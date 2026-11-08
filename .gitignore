@@ -1,0 +1,10 @@
+.env
+data/
+config/models.json
+fonts/*
+!fonts/.gitkeep
+__pycache__/
+*.pyc
+.venv/
+
+test/

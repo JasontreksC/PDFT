@@ -1,0 +1,19 @@
+services:
+  pdft:
+    build: .
+    image: pdft:latest
+    container_name: pdft
+    ports:
+      # Bound to localhost on purpose: the app has no login and uses your API keys.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data              # uploaded PDFs, translations, internal context (private)
+      - ./config:/config          # models.json (endpoints / API keys / model names)
+      - ./fonts:/app/user_fonts   # drop extra .ttf/.otf files here; restart to pick them up
+      - ./docling_host:/docling_host:ro   # lets the container read the token of the local Docling service (docling_host/run.sh)
+    env_file:
+      - path: .env                # optional: OPENAI_API_KEY=..., referenced as ${OPENAI_API_KEY} in models.json
+        required: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach Ollama / LM Studio running on the host
+    restart: unless-stopped

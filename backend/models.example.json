@@ -1,0 +1,49 @@
+{
+  "models": [
+    {
+      "id": "muse-spark-1.3-contributor",
+      "name": "Meta · Muse Spark 1.3 Contributor",
+      "type": "openai",
+      "endpoint": "https://api.meta.ai/v1",
+      "api_key": "${META_API_KEY}",
+      "model": "muse-spark-1.3-contributor",
+      "context_window": 1048576,
+      "params": { "temperature": 0.2 }
+    },
+    {
+      "id": "openai-gpt-4.1-mini",
+      "name": "OpenAI · GPT-4.1 mini",
+      "type": "openai",
+      "endpoint": "https://api.openai.com/v1",
+      "api_key": "${OPENAI_API_KEY}",
+      "model": "gpt-4.1-mini",
+      "params": { "temperature": 0.2 }
+    },
+    {
+      "id": "anthropic-sonnet",
+      "name": "Anthropic · Claude Sonnet 5.5",
+      "type": "anthropic",
+      "endpoint": "https://api.anthropic.com/v1",
+      "api_key": "${ANTHROPIC_API_KEY}",
+      "model": "claude-sonnet-5-5",
+      "max_output_tokens": 8192
+    },
+    {
+      "id": "gemini-flash",
+      "name": "Google · Gemini 2.5 Flash",
+      "type": "gemini",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+      "api_key": "${GEMINI_API_KEY}",
+      "model": "gemini-2.5-flash"
+    },
+    {
+      "id": "ollama-local",
+      "name": "Ollama (로컬) · qwen2.5:14b",
+      "type": "openai",
+      "endpoint": "http://host.docker.internal:11434/v1",
+      "api_key": "",
+      "model": "qwen2.5:14b",
+      "context_window": 32768
+    }
+  ]
+}
