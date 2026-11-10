@@ -140,8 +140,7 @@ class SettingsPatch(BaseModel):
     model_id: str | None = None
     target_lang: str | None = None
     default_font: str | None = None
-    auto_compress: bool | None = None
-    compress_pct: int | None = Field(default=None, ge=1, le=95)
+    auto_compress: bool | None = None          # refresh the background summary automatically while translating
     concurrency: int | None = Field(default=None, ge=1, le=16)
     parser_hints: bool | None = None
 
@@ -175,7 +174,7 @@ async def model_context(model_id: str, refresh: bool = False):
     if not entry:
         raise HTTPException(404, "알 수 없는 모델입니다.")
     limit, source = await limits.lookup(entry, refresh=refresh)
-    return {"model_id": model_id, "limit": limit, "source": source, "cap": pipeline.CONTEXT_CAP}
+    return {"model_id": model_id, "limit": limit, "source": source, "refresh_at": pipeline.SUMMARY_EVERY}
 
 
 # --------------------------------------------------------------------------- fonts
@@ -370,13 +369,11 @@ async def rebuild(jid: str):
 
 
 @app.get("/api/jobs/{jid}/status")
-async def job_status(jid: str, model_id: str | None = None, pct: int | None = None, lang: str | None = None):
+async def job_status(jid: str, model_id: str | None = None, lang: str | None = None):
     job = _job(jid)
     st = job.meta.get("settings", {})
     entry = _model(model_id or st.get("model_id"))
-    gauge = await pipeline.compute_gauge(
-        job, entry, pct or st.get("compress_pct") or settings.data["compress_pct"],
-        lang or st.get("target_lang") or settings.data["target_lang"])
+    gauge = await pipeline.compute_gauge(job, entry, lang or st.get("target_lang") or settings.data["target_lang"])
     return {
         "status": job.meta["status"], "error": job.meta.get("error"), "progress": job.meta.get("progress"),
         "analysis": job.meta.get("analysis"), "compose": job.meta.get("compose"), "gauge": gauge,
@@ -387,11 +384,11 @@ async def job_status(jid: str, model_id: str | None = None, pct: int | None = No
 
 # --------------------------------------------------------------------------- viewer data
 @app.get("/api/jobs/{jid}/pages/{n}/image")
-async def page_image(jid: str, n: int, scale: float = Query(2.0, ge=0.25, le=4.0)):
+async def page_image(jid: str, n: int, scale: float = Query(2.0, ge=0.25, le=4.0), orig: bool = False):
     job = _job(jid)
     scale = round(scale * 4) / 4            # 0.25 = sidebar thumbnails
     c = job.meta.get("compose")
-    if c and c.get("version", 0) > 0 and job.composed.exists():
+    if not orig and c and c.get("version", 0) > 0 and job.composed.exists():
         if not 0 <= n < c["pages"]:
             raise HTTPException(404)
         path = job.render_dir / f"c{c['version']}_{n}_{scale}.png"
@@ -425,6 +422,46 @@ async def page_boxes(jid: str, n: int):
     return {"boxes": boxes}
 
 
+def _parser_boxes(parsed: dict | None, n: int) -> list[dict]:
+    """The raw items the local Docling service reported for page n (0-based), flattened: what it recognised, as boxes."""
+    out: list[dict] = []
+    if not parsed:
+        return out
+    page = next((p for p in (parsed.get("items") or {}).get("pages", []) if p.get("page_number") == n + 1), None)
+
+    def add(it: dict, kind: str | None = None, child: bool = False) -> None:
+        bb = (it.get("bbox") or [None])[0]
+        if not bb:
+            return
+        out.append({"type": kind or it.get("type", "text"), "label": bb.get("label"), "child": child,
+                    "in_table": bool(it.get("in_table")), "in_cell": bool(it.get("in_cell")),
+                    "rect": [bb["x"], bb["y"], bb["x"] + bb["w"], bb["y"] + bb["h"]],
+                    "text": (it.get("md") or "")[:200]})
+
+    for it in (page or {}).get("items", []):
+        add(it)
+        for ch in it.get("items") or []:
+            add(ch, "list_item", True)
+    return out
+
+
+@app.get("/api/jobs/{jid}/pages/{n}/layout")
+async def page_layout(jid: str, n: int):
+    """Analysis view of ORIGINAL page n: the raw boxes of the layout parser (Docling) and the frames (text boxes) that were
+    built from the page's text layer. Both in PDF points, top-left origin, like the page image rendered with ?orig=1."""
+    job = _job(jid)
+    if not 0 <= n < len(job.meta["pages"]):
+        raise HTTPException(404)
+    parsed = json.loads(job.parse_path.read_text("utf-8")) if job.parse_path.exists() else None
+    frames = []
+    if job.has_doc:
+        for b in job.doc()["blocks"]:
+            if b.get("kind") == "text" and b.get("page") == n:
+                frames.append({"id": b["id"], "rect": b["bbox"], "lines": b.get("n_lines", 1), "chrome": bool(b.get("chrome")),
+                               "text": (b.get("src") or "")[:200]})
+    return {"parser": _parser_boxes(parsed, n), "has_parser": parsed is not None, "frames": frames}
+
+
 @app.get("/api/jobs/{jid}/blocks/{bid}")
 async def get_block(jid: str, bid: str):
     job = _job(jid)
@@ -438,8 +475,7 @@ async def get_block(jid: str, bid: str):
 class TranslateReq(BaseModel):
     model_id: str
     target_lang: str = "Korean"
-    auto_compress: bool = True
-    compress_pct: int = Field(default=70, ge=1, le=95)
+    auto_compress: bool = True                            # refresh the background summary while translating
     concurrency: int = Field(default=4, ge=1, le=16)      # pages translated at the same time
 
 
@@ -466,8 +502,8 @@ async def translate(jid: str, req: TranslateReq):
     if all(u.ref.get("tgt") is not None for u in units):
         raise HTTPException(400, "선택한 쪽은 이미 모두 번역되었습니다. 다른 쪽을 선택하거나 '번역 초기화' 후 다시 시도하세요.")
     settings.update({"model_id": req.model_id, "target_lang": req.target_lang,
-                     "auto_compress": req.auto_compress, "compress_pct": req.compress_pct, "concurrency": req.concurrency})
-    runner.start(job, entry, req.target_lang, req.auto_compress, req.compress_pct, req.concurrency)
+                     "auto_compress": req.auto_compress, "concurrency": req.concurrency})
+    runner.start(job, entry, req.target_lang, req.auto_compress, req.concurrency)
     return {"ok": True}
 
 
@@ -535,12 +571,12 @@ async def put_selection(jid: str, req: SelectionReq):
 async def compress_now(jid: str, model_id: str | None = None):
     job = _job(jid)
     if runner.running(jid):
-        raise HTTPException(409, "번역 중에는 자동으로 압축됩니다.")
+        raise HTTPException(409, "번역 중에는 맥락 요약이 자동으로 갱신됩니다.")
     entry = _model(model_id or job.meta.get("settings", {}).get("model_id"))
     lang = job.meta.get("settings", {}).get("target_lang") or settings.data["target_lang"]
     limit, _ = await limits.lookup(entry)
     try:
-        did = await pipeline.compress_context(job.context(), entry, lang, limit, job)
+        did = await pipeline.refresh_summary(job.context(), entry, lang, limit, job)
     except llm.LLMError as e:
         raise HTTPException(502, str(e)) from e
     job.save_context()
@@ -614,6 +650,16 @@ async def health():
     return {"ok": True}
 
 
+class _Frontend(StaticFiles):
+    """The UI files change with every release: without a Cache-Control header browsers keep serving their old copy for hours
+    (heuristic freshness). `no-cache` = always revalidate with the ETag (a 304 costs nothing)."""
+
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 # static frontend (must be last)
 if config.FRONTEND_DIR.exists():
-    app.mount("/", StaticFiles(directory=config.FRONTEND_DIR, html=True), name="frontend")
+    app.mount("/", _Frontend(directory=config.FRONTEND_DIR, html=True), name="frontend")

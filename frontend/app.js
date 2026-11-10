@@ -18,7 +18,7 @@ const S = {
   docling: { available: false }, models: [], modelErrors: [], fonts: [], settings: {},
   job: null, pages: [], ver: 0, specKey: "", zoom: 1, fitMode: true, gauge: null, limitInfo: null,
   sel: null, pollTimer: null, busy: false, waitCompose: false, shownError: null,
-  picked: new Set(), lastPick: null, curPage: 0, pstate: [],   // page list: pages the work is scoped to
+  layout: false, picked: new Set(), lastPick: null, curPage: 0, pstate: [],   // page list: pages the work is scoped to
 };
 
 // ------------------------------------------------------------------ helpers
@@ -54,6 +54,7 @@ const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
 };
+S.layout = store.get("pdft.layout") === "1";
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const familyInfo = (name) => S.fonts.find((f) => f.family === name);
 const defaultFont = () => S.settings.default_font;
@@ -139,15 +140,13 @@ function bindUI() {
 
   $("#s-lang").onchange = guard((e) => saveSettings({ target_lang: e.target.value }));
   $("#s-auto").onchange = guard(async (e) => { await saveSettings({ auto_compress: e.target.checked }); await refreshGauge(); });
-  const savePct = debounce(guard(async (v) => { await saveSettings({ compress_pct: v }); await refreshGauge(); }), 300);
   const saveConc = debounce(guard((v) => saveSettings({ concurrency: v })), 300);
   $("#s-conc").oninput = (e) => { $("#s-conc-out").textContent = e.target.value; saveConc(+e.target.value); };
-  $("#s-pct").oninput = (e) => { $("#s-pct-out").textContent = e.target.value + "%"; savePct(+e.target.value); if (S.gauge) renderGauge({ ...S.gauge, trigger: Math.round(Math.min(S.gauge.limit * e.target.value / 100, S.gauge.cap ?? Infinity)) }); };
   $("#ctx-refresh").onclick = guard(async () => { await refreshLimit(true); toast("모델 컨텍스트 한도를 다시 조회했습니다."); });
   $("#ctx-compress").onclick = guard(async () => {
     if (!S.job) return toast("먼저 PDF를 여세요.", true);
     const r = await api(`/api/jobs/${S.job.id}/compress?model_id=${encodeURIComponent(S.settings.model_id)}`, { method: "POST" });
-    toast(r.compressed ? "컨텍스트를 압축했습니다." : "압축할 내용이 아직 없습니다.");
+    toast(r.compressed ? "맥락 요약을 갱신했습니다." : "요약할 새 번역이 아직 없습니다.");
     await refreshGauge();
   });
   $("#models-reload").onclick = guard(async () => {
@@ -161,6 +160,8 @@ function bindUI() {
   $("#z-in").onclick = () => setZoom(S.zoom * 1.15);
   $("#z-out").onclick = () => setZoom(S.zoom / 1.15);
   $("#z-fit").onclick = () => { S.fitMode = true; applyZoom(); };
+  $("#z-layout").onclick = () => setLayoutView(!S.layout);
+  $("#lay-doc").onchange = $("#lay-fr").onchange = applyLayChecks;
   window.addEventListener("resize", debounce(() => { if (S.fitMode) applyZoom(); positionPanel(); }, 120));
   $("#viewer").addEventListener("scroll", () => requestAnimationFrame(positionPanel), { passive: true });
 
@@ -193,7 +194,6 @@ function updateEstimate() {
 
 function renderSettingsUI() {
   $("#s-auto").checked = !!S.settings.auto_compress;
-  $("#s-pct").value = S.settings.compress_pct; $("#s-pct-out").textContent = S.settings.compress_pct + "%";
   $("#s-conc").value = S.settings.concurrency ?? 4; $("#s-conc-out").textContent = S.settings.concurrency ?? 4;
   $("#s-lang").value = S.settings.target_lang;
   if ($("#s-parser")) $("#s-parser").checked = scanPages() > 0 || !!S.settings.parser_hints;
@@ -300,27 +300,28 @@ async function refreshLimit(refresh = false) {
 }
 async function refreshGauge() {
   if (S.job) {
-    const q = new URLSearchParams({ model_id: S.settings.model_id, pct: S.settings.compress_pct, lang: S.settings.target_lang });
+    const q = new URLSearchParams({ model_id: S.settings.model_id, lang: S.settings.target_lang });
     S.gauge = (await api(`/api/jobs/${S.job.id}/status?${q}`)).gauge;
   } else if (S.limitInfo) {
-    S.gauge = { used: 0, limit: S.limitInfo.limit, limit_source: S.limitInfo.source, trigger: Math.round(Math.min(S.limitInfo.limit * S.settings.compress_pct / 100, S.limitInfo.cap ?? Infinity)), cap: S.limitInfo.cap, compressions: 0 };
+    S.gauge = { used: 0, limit: S.limitInfo.limit, limit_source: S.limitInfo.source, pending: 0, refresh_at: S.limitInfo.refresh_at, compressions: 0 };
   }
   renderGauge(S.gauge);
 }
 const SOURCE_LABEL = { config: "models.json 설정값", api: "모델 API 조회", builtin: "내장 표 기준 추정", default: "조회 불가 → 임시 8,192 (models.json에 context_window를 지정하세요)" };
 function renderGauge(g) {
   if (!g) return;
+  // used = what every request carries besides the text (system prompt + short summary + glossary), not a growing history
   const pct = Math.min(100, (g.used / g.limit) * 100);
-  const level = g.used >= g.limit * 0.9 ? "bad" : g.used >= g.trigger ? "warn" : "ok";
-  const markPct = Math.min(100, (g.trigger / g.limit) * 100);
-  $(".g-fill").style.width = pct + "%"; $(".g-mark").style.left = markPct + "%";
+  const level = g.used >= g.limit * 0.85 ? "bad" : g.used >= g.limit * 0.5 ? "warn" : "ok";
+  $(".g-fill").style.width = Math.max(pct, g.used ? 1 : 0) + "%";
   $("#gauge").dataset.level = level; $(".g-num").textContent = `${fmtTok(g.used)} / ${fmtTok(g.limit)}`;
-  $("#gauge").title = `컨텍스트 사용량 ${g.used.toLocaleString()} / ${g.limit.toLocaleString()} tokens (${pct.toFixed(1)}%)`;
+  $("#gauge").title = `요청마다 보내는 맥락 ${g.used.toLocaleString()} tokens (모델 한도 ${g.limit.toLocaleString()}의 ${pct.toFixed(1)}%)`;
   const big = $("#gauge-big");
-  big.dataset.level = level; $("i", big).style.width = pct + "%"; $("b", big).style.left = markPct + "%";
+  big.dataset.level = level; $("i", big).style.width = Math.max(pct, g.used ? 1 : 0) + "%";
   $("#ctx-limit").textContent = g.limit.toLocaleString() + " tokens";
   $("#ctx-source").textContent = SOURCE_LABEL[g.limit_source] || "";
-  $("#gauge-detail").textContent = `사용 ${g.used.toLocaleString()} (${pct.toFixed(1)}%) · 압축 시작 ${g.trigger.toLocaleString()}${g.cap && g.trigger >= g.cap ? " (비용 보호 상한)" : ""} · 압축 ${g.compressions || 0}회`;
+  $("#gauge-detail").textContent = `요청마다 보내는 맥락(지시문+요약+용어집) ${g.used.toLocaleString()} (${pct.toFixed(1)}%)`
+    + ` · 요약 대기 ${(g.pending || 0).toLocaleString()} / ${(g.refresh_at || 0).toLocaleString()} · 요약 갱신 ${g.compressions || 0}회`;
 }
 
 // ------------------------------------------------------------------ jobs
@@ -343,6 +344,7 @@ async function openJob(id) {
   document.body.classList.add("has-doc");
   S.picked = new Set(job.selected_pages ?? Array.from({ length: job.pages.length }, (_, i) => i)); S.lastPick = null; S.curPage = 0; S.pstate = [];
   buildPages(); buildThumbs();
+  setLayoutView(S.layout);
   updateEstimate(); renderProgress(); renderControls();
   await refreshGauge();
   poll();
@@ -367,7 +369,7 @@ async function poll() {
   if (!S.job) return;
   const id = S.job.id;
   try {
-    const q = new URLSearchParams({ model_id: S.settings.model_id, pct: S.settings.compress_pct, lang: S.settings.target_lang });
+    const q = new URLSearchParams({ model_id: S.settings.model_id, lang: S.settings.target_lang });
     const st = await api(`/api/jobs/${id}/status?${q}`);
     if (!S.job || S.job.id !== id) return;
     S.gauge = st.gauge; renderGauge(st.gauge);
@@ -460,7 +462,7 @@ async function startTranslate() {
   await pushSelection();
   await api(`/api/jobs/${S.job.id}/translate`, {
     method: "POST",
-    json: { model_id: m.id, target_lang: S.settings.target_lang, auto_compress: S.settings.auto_compress, compress_pct: S.settings.compress_pct, concurrency: S.settings.concurrency ?? 4 },
+    json: { model_id: m.id, target_lang: S.settings.target_lang, auto_compress: S.settings.auto_compress, concurrency: S.settings.concurrency ?? 4 },
   });
   S.job.status = "translating"; renderControls(); poll();
 }
@@ -513,8 +515,8 @@ function buildPages() {
   wrap.replaceChildren(...S.pages.map((pg) => {
     const el = document.createElement("section");
     el.className = "page"; el.dataset.i = pg.i;
-    el.innerHTML = `<div class="page-inner" style="width:${pg.w}px;height:${pg.h}px"><img class="bg" alt="" draggable="false"><div class="hits"></div></div><span class="page-no">${pg.i + 1}</span>`;
-    pg.el = el; pg.img = $("img", el); pg.hitsEl = $(".hits", el); pg.inner = $(".page-inner", el);
+    el.innerHTML = `<div class="page-inner" style="width:${pg.w}px;height:${pg.h}px"><img class="bg" alt="" draggable="false"><div class="hits"></div><div class="layout"></div></div><span class="page-no">${pg.i + 1}</span>`;
+    pg.el = el; pg.img = $("img", el); pg.hitsEl = $(".hits", el); pg.layEl = $(".layout", el); pg.inner = $(".page-inner", el);
     return el;
   }));
   applyZoom();
@@ -557,11 +559,12 @@ function setZoom(z) { S.fitMode = false; S.zoom = Math.max(0.25, Math.min(4, z))
 const reloadImages = debounce(() => S.pages.forEach((pg) => pg.loaded && setImage(pg)), 250);
 
 function setImage(pg) {
-  const url = `/api/jobs/${S.job.id}/pages/${pg.i}/image?scale=${bucket()}&v=${S.ver}`;
+  const url = `/api/jobs/${S.job.id}/pages/${pg.i}/image?scale=${bucket()}&v=${S.ver}${S.layout ? "&orig=1" : ""}`;
   if (pg.img.dataset.src !== url) { pg.img.dataset.src = url; pg.img.src = url; }
 }
 function loadPage(pg, force = false) {
   pg.loaded = true; setImage(pg);
+  if (S.layout) loadLayout(pg, force);
   if (S.ver > 0 && (force || !pg.boxes) && !pg.fetching) {
     pg.fetching = true;
     const ver = S.ver;
@@ -587,6 +590,54 @@ function renderHits(pg) {
     return el;
   }));
   if (S.sel) positionPanel();
+}
+
+// ------------------------------------------------------------------ analysis view (Docling regions + frames over the original page)
+function setLayoutView(on) {
+  S.layout = on; store.set("pdft.layout", on ? "1" : "0");
+  document.body.classList.toggle("lay-on", on);
+  $("#z-layout").setAttribute("aria-pressed", String(on)); $("#lay-bar").hidden = !on;
+  S.pages.forEach((pg) => { pg.layout = null; if (pg.loaded) { setImage(pg); if (on) loadLayout(pg, true); } });
+  if (on) { deselect(); }
+  updateLayCounts();
+}
+async function loadLayout(pg, force = false) {
+  if (pg.layout && !force) { renderLayout(pg); return; }
+  if (pg.layFetching) return;
+  pg.layFetching = true;
+  try {
+    pg.layout = await api(`/api/jobs/${S.job.id}/pages/${pg.i}/layout`);
+    renderLayout(pg);
+  } catch { /* the page image still shows */ } finally { pg.layFetching = false; }
+}
+function renderLayout(pg) {
+  const L = pg.layout; if (!L) return;
+  const mk = (cls, rect, title) => {
+    const el = document.createElement("div");
+    el.className = "lb " + cls; el.title = title;
+    const [x0, y0, x1, y1] = rect;
+    Object.assign(el.style, { left: x0 + "px", top: y0 + "px", width: Math.max(2, x1 - x0) + "px", height: Math.max(2, y1 - y0) + "px" });
+    return el;
+  };
+  const els = [];
+  for (const b of L.parser) {
+    const cls = `doc t-${b.type}` + (b.in_table ? " in_table" : "") + (b.in_cell ? " in_cell" : "");
+    els.push(mk(cls, b.rect, `Docling · ${b.type}${b.label ? " (" + b.label + ")" : ""}${b.in_table ? " · 표 안의 줄" : ""}${b.in_cell ? " · 표 칸" : ""}\n${b.text}`));
+  }
+  for (const f of L.frames) els.push(mk("fr" + (f.chrome ? " chrome" : ""), f.rect, `글상자 · ${f.lines}줄${f.chrome ? " · 머리글/바닥글" : ""}\n${f.text}`));
+  pg.layEl.replaceChildren(...els);
+  updateLayCounts();
+}
+function updateLayCounts() {
+  if (!S.layout) return;
+  const pg = S.pages[S.curPage], L = pg?.layout;
+  $("#lay-doc-n").textContent = L ? (L.has_parser ? `${L.parser.length}` : "—") : "…";
+  $("#lay-fr-n").textContent = L ? `${L.frames.length}` : "…";
+  $("#lay-note").textContent = `${S.curPage + 1}쪽 · 원본 쪽 기준` + (L && !L.has_parser ? " · Docling 결과 없음(힌트 꺼짐)" : "");
+}
+function applyLayChecks() {
+  document.body.classList.toggle("lay-hide-doc", !$("#lay-doc").checked);
+  document.body.classList.toggle("lay-hide-fr", !$("#lay-fr").checked);
 }
 
 // ------------------------------------------------------------------ page list (sidebar): select the pages to work on
@@ -707,7 +758,7 @@ function updateCurrent() {
   for (const pg of S.pages) { if (pg.el.offsetTop <= mid) cur = pg.i; else break; }
   if (cur === S.curPage) return;
   S.curPage = cur;
-  refreshThumbs();
+  refreshThumbs(); updateLayCounts();
   const el = $(`.thumb[data-i="${cur}"]`), box = $("#thumbs");
   if (el && !box.matches(":hover")) {
     const r = el.getBoundingClientRect(), b = box.getBoundingClientRect();

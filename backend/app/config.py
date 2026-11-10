@@ -54,6 +54,7 @@ class ModelEntry:
     headers: dict = field(default_factory=dict)
     timeout: float = 300.0
     prompt_cache_key: bool | None = None   # send a stable `prompt_cache_key` so repeated prefixes hit the cache
+    dropped: set = field(default_factory=set, repr=False, compare=False)   # params the server rejected (see clients._openai)
 
     @property
     def is_local(self) -> bool:
@@ -146,8 +147,7 @@ DEFAULT_SETTINGS = {
     "model_id": None,
     "target_lang": "Korean",
     "default_font": None,
-    "auto_compress": True,
-    "compress_pct": 70,
+    "auto_compress": True,         # refresh the short background summary while translating
     "concurrency": 4,
     "parser_hints": True,          # also use the local Docling layout as hints for text pages (scans always need it)
 }

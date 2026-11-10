@@ -56,14 +56,9 @@
             <span id="ctx-source" class="muted"></span>
             <button class="link" id="ctx-refresh" title="모델 API에서 다시 조회">다시 조회</button>
           </div>
-          <div class="gauge-big" id="gauge-big"><i></i><b></b></div>
+          <div class="gauge-big" id="gauge-big"><i></i></div>
           <div class="muted small" id="gauge-detail"></div>
-          <label class="check"><input type="checkbox" id="s-auto"> 컨텍스트 자동 압축</label>
-          <label class="slider-row">
-            <span>압축 시작 지점</span>
-            <input type="range" id="s-pct" min="10" max="95" step="5">
-            <output id="s-pct-out"></output>
-          </label>
+          <label class="check" title="번역한 내용을 모아 짧은 맥락 요약과 용어집으로 정리합니다. 요청마다 보내는 것은 이 요약과 용어집뿐입니다."><input type="checkbox" id="s-auto"> 맥락 요약 자동 갱신</label>
           <div class="sep"></div>
           <div class="group-title">속도</div>
           <label class="slider-row" title="동시에 번역할 쪽 수. 높일수록 빠르지만 API 요청 한도(429)에 걸리기 쉽고, 같은 시점의 쪽끼리는 서로의 번역·용어를 보지 못합니다 (1 = 순차).">
@@ -73,7 +68,7 @@
           </label>
           <div class="muted small" style="padding:0 10px 2px">쪽 단위로 동시에 번역합니다. 1이면 순차(용어 일관성 최대).</div>
           <div class="row-btns">
-            <button class="btn small" id="ctx-compress">지금 압축</button>
+            <button class="btn small" id="ctx-compress">요약 지금 갱신</button>
             <button class="btn small ghost" id="models-reload">models.json 다시 읽기</button>
           </div>
         </div>
@@ -96,9 +91,9 @@
       <button id="btn-analyze" class="btn" disabled>문서 분석</button>
     </div>
 
-    <button id="gauge" class="gauge" title="컨텍스트 사용량 / 모델 한도">
+    <button id="gauge" class="gauge" title="요청마다 보내는 맥락 / 모델 한도">
       <span class="g-label">컨텍스트</span>
-      <span class="g-bar"><i class="g-fill"></i><b class="g-mark"></b></span>
+      <span class="g-bar"><i class="g-fill"></i></span>
       <span class="g-num">— / —</span>
     </button>
     <button id="btn-main" class="btn primary" disabled>번역 시작</button>
@@ -131,7 +126,15 @@
   </main>
   </div>
 
+  <div id="lay-bar" hidden>
+    <strong>분석 보기</strong>
+    <label title="로컬 Docling 서비스가 인식한 구역 그대로"><input type="checkbox" id="lay-doc" checked><i class="sw sw-doc"></i> Docling 구역 <span id="lay-doc-n" class="muted"></span></label>
+    <label title="PDF 텍스트 층에서 만든 글상자 (번역 단위)"><input type="checkbox" id="lay-fr" checked><i class="sw sw-fr"></i> 글상자 <span id="lay-fr-n" class="muted"></span></label>
+    <span id="lay-note" class="muted"></span>
+  </div>
+
   <div id="zoom">
+    <button id="z-layout" aria-pressed="false" title="분석 결과 보기: Docling이 인식한 구역과 글상자를 원본 쪽 위에 그립니다">▦ 분석</button>
     <button id="z-out" aria-label="축소">−</button>
     <button id="z-fit" title="너비에 맞춤">100%</button>
     <button id="z-in" aria-label="확대">＋</button>

@@ -8,9 +8,11 @@ typography says the second one is the wrapped continuation of the first:
   * candidate link: the lower line sits right below, similar size, and shares an edge / the centre line
   * wrap test (the typographic rule itself): a line break inside a paragraph exists because the NEXT word
     did not fit - so the upper line must be filled up to the text block's right edge within one word
-  * leading test: the line pitch equals the document's own measured leading (taken from certain wraps)
-  * explicit markers (bullet glyphs, "1."), a bold<->regular change, or a different parser region start a new frame
+  * explicit markers (bullet glyphs, "1."), a bold<->regular change or a colon label start a new frame - unless the layout
+    parser (Docling) puts both lines in ONE region (then it decides: same region = one frame, different regions = two)
 
+Nothing is learned from the document (no measured leading): every decision looks at the two lines themselves, so a
+short excerpt behaves like the whole book.
 A wrong decision only moves a frame boundary; the text stays where it was printed.
 """
 from __future__ import annotations
@@ -114,80 +116,26 @@ def _bounds(chain) -> tuple[float, float]:
     return min(l.bbox[0] for l, _ in chain), max(l.bbox[2] for l, _ in chain)
 
 
-def certain_pitches(chains) -> list[tuple[float, float]]:
-    """Pitch/size of line pairs whose break is unmistakably a wrap: the upper line is a real sentence filled to the edge
-    AND the same holds for the pair before it (a 3+ line paragraph). One filled line between short rows (the longest row
-    of a table of contents) is not evidence."""
-    out = []
-    for ch in chains:
-        if len(ch) < 3:
-            continue
-        L, R = _bounds(ch)
-        ok = [(_tokens(a) >= 3 and al == "left" and R - a.bbox[2] <= 0.35 * a.size and not b.marker)
-              for (a, _), (b, al) in zip(ch, ch[1:])]
-        for i, flag in enumerate(ok):
-            if flag and ((i > 0 and ok[i - 1]) or (i + 1 < len(ok) and ok[i + 1])):
-                a, b = ch[i][0], ch[i + 1][0]
-                out.append((round(a.size, 1), (b.base - a.base) / a.size))
-    return out
-
-
-def build_leading(ratios: list[tuple[float, float]]) -> dict | None:
-    """The line pitches (pitch/size) this document really uses, per font size: bins of 0.05 with enough support.
-    One size can have several (body text 1.36, table cells 1.23)."""
-    if len(ratios) < 5:
-        return None
-
-    def centers(vals: list[float]) -> list[float]:
-        bins: dict[int, list[float]] = {}
-        for v in vals:
-            bins.setdefault(round(v / 0.05), []).append(v)
-        out = []
-        for k, vs in sorted(bins.items()):
-            n = len(vs) + len(bins.get(k - 1, [])) + len(bins.get(k + 1, []))
-            if n >= 3 and len(vs) >= len(bins.get(k - 1, [])) and len(vs) >= len(bins.get(k + 1, [])):
-                out.append(statistics.median(vs))
-        return out
-
-    leading: dict = {"_all": centers([r for _, r in ratios])}
-    by: dict[float, list[float]] = {}
-    for sz, r in ratios:
-        by.setdefault(sz, []).append(r)
-    for sz, rs in by.items():
-        c = centers(rs)
-        if c:
-            leading[sz] = c
-    return leading if leading["_all"] else None
-
-
-def _lead_ok(leading, size: float, pitch: float) -> bool:
-    """Is this pitch one the document uses at this font size?"""
-    if leading is None:
-        return True
-    own = leading.get(round(size, 1)) if isinstance(leading, dict) else None
-    if own:
-        return any(abs(pitch - c) <= 0.07 for c in own)
-    cs = leading["_all"] if isinstance(leading, dict) else [leading]
-    return any(abs(pitch - c) <= 0.12 for c in cs)
-
-
-def split_chain(chain, leading: dict | None, region_of=None):
+def split_chain(chain, region_of=None):
     """Cut a candidate chain into frames."""
     L, R = _bounds(chain)
     groups = [[chain[0][0]]]
     for (a, _), (b, al) in zip(chain, chain[1:]):
         cut = False
         reason = ""
+        ra = region_of(a) if region_of is not None else None
+        # one parser region = one text, except code: its lines are real line breaks and must stay separate
+        same_region = ra is not None and ra == region_of(b) and region_of.regions[ra]["kind"] != "code"
         if b.marker:
             cut, reason = True, "marker"
+        elif same_region:
+            pass                                        # the layout parser says these two lines are ONE text: trust it over the soft rules below
         elif re.search(r"[:：]$", a.plain):
             cut, reason = True, "label"                 # "Cost:" - a label never wraps into the next line
         elif abs(a.bold_share - b.bold_share) > 0.6:
             cut, reason = True, "style"
         elif region_of is not None and region_of(a) is not None and region_of(b) is not None and region_of(a) != region_of(b):
             cut, reason = True, "region"
-        elif not _lead_ok(leading, a.size, (b.base - a.base) / a.size):
-            cut, reason = True, "leading"
         else:
             hyph = a.plain.endswith("-") and len(a.plain) > 2
             if al == "right":
@@ -319,7 +267,7 @@ def _rects(items, out: list[dict], depth: int = 0, in_list: bool = False, hints:
         md = (it.get("md") or it.get("value") or "").strip()
         if not bbs or not md:
             continue
-        kind = "heading" if t == "heading" else ("list_item" if in_list else "text")
+        kind = "heading" if t == "heading" else ("code" if t == "code" else ("list_item" if in_list else "text"))
         rect = [min(b["x"] for b in bbs), min(b["y"] for b in bbs), max(b["x"] + b["w"] for b in bbs), max(b["y"] + b["h"] for b in bbs)]
         out.append({"kind": kind, "rect": rect, "md": md, "level": it.get("level"), "line": bool(it.get("in_table"))})
 
@@ -332,6 +280,7 @@ def _region_of(regions: list[dict]):
             if x0 - 2 <= line.cx <= x1 + 2 and y0 - 2 <= line.cy <= y1 + 2 and (x1 - x0) * (y1 - y0) < area:
                 best, area = k, (x1 - x0) * (y1 - y0)
         return best
+    f.regions = regions
     return f
 
 
@@ -373,10 +322,9 @@ def _scan_line_frames(regs: list[dict], page: int, W: float = 612.0) -> list[dic
         tl._marker_split(ln)
         lines.append(ln)
     chains = candidate_chains(lines)
-    leading = build_leading(certain_pitches(chains))
     out = []
     for ch in chains:
-        for g in split_chain(ch, leading):
+        for g in split_chain(ch):
             f = _finish(make_frame(g, page, ""))
             f["role"] = "text"
             f["scan"] = True
@@ -426,9 +374,8 @@ def _build(doc: pymupdf.Document, parsed: dict | None) -> dict:
     body = _weighted_median(sizes) or 10.0
     repeated = doc_repeated(doc, all_lines)
 
-    # pass 1: candidate chains per page, and the document's own leading from the certain wraps
+    # pass 1: candidate chains per page
     per_page: dict[int, dict] = {}
-    ratios: list[tuple[float, float]] = []
     for i in range(n):
         lines = all_lines[i]
         if not lines:
@@ -450,12 +397,10 @@ def _build(doc: pymupdf.Document, parsed: dict | None) -> dict:
             else:
                 body_lines.append(l)
         chains = candidate_chains(body_lines)
-        ratios.extend(certain_pitches(chains))
         regions: list[dict] = []
         if i in parsed_pages:
             _rects(parsed_pages[i].get("items"), regions, hints=True)
         per_page[i] = {"chains": chains, "chrome": chrome, "fig": fig, "W": W, "H": H, "regions": regions}
-    leading = build_leading(ratios)
 
     frames: list[dict] = []
     untouched: dict[str, list[list[float]]] = {}
@@ -467,7 +412,7 @@ def _build(doc: pymupdf.Document, parsed: dict | None) -> dict:
             pg = per_page[i]
             region_of = _region_of(pg["regions"]) if pg["regions"] else None
             for ch in pg["chains"]:
-                for g in split_chain(ch, leading, region_of):
+                for g in split_chain(ch, region_of):
                     pf.append(make_frame(g, i, ""))
             pf = [_finish(f) for f in pf]
             infer_alignment_style(pf, W)
@@ -525,7 +470,7 @@ def _build(doc: pymupdf.Document, parsed: dict | None) -> dict:
     stats["frames"] = len(frames)
     return {"version": 2, "page_count": n, "page_size": list(page_size), "page_sizes": [list(s) for s in sizes_pg],
             "body_size": round(body, 1), "blocks": frames, "keep_pages": sorted(keep), "scan_pages": sorted(scans),
-            "paint_pages": paint_pages, "untouched": untouched, "leading": leading, "stats": dict(stats), "warnings": warnings}
+            "paint_pages": paint_pages, "untouched": untouched, "stats": dict(stats), "warnings": warnings}
 
 
 def scan_pages_of(doc: pymupdf.Document, keep: set[int]) -> list[int]:

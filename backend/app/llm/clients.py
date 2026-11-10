@@ -7,12 +7,16 @@ there is no code path through which a page image or any binary could be sent.
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from dataclasses import dataclass
 
 import httpx
 
 from ..config import ModelEntry
+
+
+log = logging.getLogger("pdft.llm")
 
 
 class LLMError(RuntimeError):
@@ -99,14 +103,34 @@ async def _openai(entry: ModelEntry, system: str, user: str, max_tokens: int | N
     headers = {"Content-Type": "application/json", **entry.headers}
     if entry.api_key:
         headers["Authorization"] = f"Bearer {entry.api_key}"
-    body = {
-        "model": entry.model,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        **entry.params,
-    }
-    if cache_key and entry.use_cache_key and "prompt_cache_key" not in body:
-        body["prompt_cache_key"] = cache_key
-    data = await request_json(entry, "POST", f"{entry.endpoint}/chat/completions", headers=headers, body=body)
+    params = {k: v for k, v in entry.params.items() if k not in entry.dropped}
+    data = None
+    for _ in range(len(params) + 1):
+        body = {
+            "model": entry.model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            **params,
+        }
+        if cache_key and entry.use_cache_key and "prompt_cache_key" not in body:
+            body["prompt_cache_key"] = cache_key
+        try:
+            data = await request_json(entry, "POST", f"{entry.endpoint}/chat/completions", headers=headers, body=body)
+            break
+        except LLMError as e:
+            # Models differ in which sampling parameters they take (OpenAI's reasoning models accept only the default
+            # `temperature`, some reject `reasoning_effort`...). A 400 that names one of the configured params drops
+            # that param for this model from now on and the request is repeated, so a models.json entry written for
+            # one model keeps working on its successors.
+            msg = str(e)
+            bad = [k for k in params if k in msg] if msg.startswith("HTTP 400") else []
+            if not bad:
+                raise
+            for k in bad:
+                params.pop(k)
+                entry.dropped.add(k)
+            log.warning("%s rejected parameter(s) %s - sending without them from now on", entry.id, ", ".join(bad))
+    if data is None:
+        raise LLMError("요청 실패: 모델이 설정된 params를 모두 거부했습니다.")
     try:
         choice = data["choices"][0]
         text = _join(choice["message"].get("content") or "")
