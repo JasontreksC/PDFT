@@ -1,62 +1,47 @@
-"""Local Docling service for PDFT (runs NATIVELY on the Mac so Docling can use the Apple GPU / MPS).
+"""Docling service for PDFT (runs as its own container, CPU only).
 
-Docker Desktop on a Mac runs Linux in a VM: no MPS inside the container. This small service runs on the host instead and
-the PDFT container calls it (http://host.docker.internal:8765). It only does layout analysis / OCR: PDF in, the parser-result
-JSON the frame builder reads out. Nothing leaves your machine.
+The PDFT container calls it over the compose network (http://docling:8765). It only does layout analysis (no OCR):
+PDF in, the parser-result JSON the frame builder reads out ("기본 번역": Docling's regions are the hints that group the
+text layer's lines into frames). Nothing leaves your machine. No GPU is used.
 
-  ./run.sh            # creates .venv on first use, then starts on 0.0.0.0:8765 (the container reaches it through the host)
+Optional auth: set PDFT_DOCLING_TOKEN (same value in both containers) to require `Authorization: Bearer <token>`.
+The port is not published to the host, so on the compose network the token is normally not needed.
 """
 from __future__ import annotations
 
 import os
 import secrets
-import sys
 import tempfile
 import threading
 import time
 import uuid
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent / "backend"))
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile  # noqa: E402
+import docling_convert as D
 
-from app.parse import docling_convert as D  # noqa: E402
-
-TOKEN_FILE = HERE / ".token"
-if not TOKEN_FILE.exists():
-    TOKEN_FILE.write_text(secrets.token_urlsafe(24))
-    TOKEN_FILE.chmod(0o600)
-TOKEN = os.environ.get("PDFT_DOCLING_TOKEN") or TOKEN_FILE.read_text().strip()
+TOKEN = os.environ.get("PDFT_DOCLING_TOKEN", "").strip()
+THREADS = int(os.environ.get("DOCLING_THREADS") or max(2, os.cpu_count() or 2))
+DEVICE = "cpu"                      # CPU only, on purpose
 
 app = FastAPI(title="PDFT Docling service")
 _jobs: dict[str, dict] = {}
-_conv: dict[tuple, object] = {}
+_conv: dict[bool, object] = {}
 _lock = threading.Lock()            # one conversion at a time: the models are not meant to be shared across threads
 
 
 def auth(authorization: str | None = Header(default=None)) -> None:
+    if not TOKEN:
+        return
     if not authorization or not secrets.compare_digest(authorization, f"Bearer {TOKEN}"):
         raise HTTPException(401, "invalid or missing token")
-
-
-def _device() -> str:
-    try:
-        import torch
-        if torch.backends.mps.is_available():
-            return "mps"
-        if torch.cuda.is_available():
-            return "cuda"
-    except Exception:  # noqa: BLE001
-        pass
-    return "cpu"
 
 
 @app.get("/health")
 def health():
     import docling
-    info = {"ok": True, "device": _device(), "docling": getattr(docling, "__version__", "?")}
+    info = {"ok": True, "device": DEVICE, "docling": getattr(docling, "__version__", "?")}
     try:
         import torch
         info["torch"] = torch.__version__
@@ -65,16 +50,15 @@ def health():
     return info
 
 
-def _run(jid: str, path: Path, table_structure: bool, ocr: bool, device: str) -> None:
+def _run(jid: str, path: Path, table_structure: bool) -> None:
     job = _jobs[jid]
     try:
         with _lock:
-            dev = _device() if device == "auto" else device
-            key = (table_structure, ocr, dev)
+            key = table_structure
             if key not in _conv:
                 job["message"] = "모델 불러오는 중"
-                _conv[key] = D.make_converter(table_structure=table_structure, ocr=ocr, device=dev, threads=max(4, (os.cpu_count() or 8)))
-            job["device"] = dev
+                _conv[key] = D.make_converter(table_structure=table_structure, device=DEVICE, threads=THREADS)
+            job["device"] = DEVICE
             job["message"] = "분석 중"
 
             def prog(done: int, total: int) -> None:
@@ -89,16 +73,14 @@ def _run(jid: str, path: Path, table_structure: bool, ocr: bool, device: str) ->
 
 
 @app.post("/jobs", dependencies=[Depends(auth)])
-async def create_job(file: UploadFile = File(...), table_structure: bool = False, ocr: bool = True, device: str = "auto"):
-    if device not in ("auto", "cpu", "mps", "cuda"):
-        raise HTTPException(400, "device must be auto|cpu|mps|cuda")
+async def create_job(file: UploadFile = File(...), table_structure: bool = False):
     fd, name = tempfile.mkstemp(suffix=".pdf", prefix="pdft-docling-")
     with os.fdopen(fd, "wb") as f:
         while chunk := await file.read(1 << 20):
             f.write(chunk)
     jid = uuid.uuid4().hex[:12]
     _jobs[jid] = {"status": "running", "done": 0, "total": 0, "message": "대기 중", "created": time.time(), "result": None, "error": None}
-    threading.Thread(target=_run, args=(jid, Path(name), table_structure, ocr, device), daemon=True).start()
+    threading.Thread(target=_run, args=(jid, Path(name), table_structure), daemon=True).start()
     return {"id": jid}
 
 

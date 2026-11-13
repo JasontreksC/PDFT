@@ -248,15 +248,6 @@ def strip_markup(s: str) -> str:
     return s
 
 
-def md_to_markup(md: str) -> str:
-    """Parser text (markdown-ish) -> our markup (used only for pages without a text layer)."""
-    s = re.sub(r"</?[a-zA-Z][^>]*>", "", md)      # <u>, <font color=...> ...
-    s = re.sub(r"^\s*(#{1,6}\s+|[*\-+]\s+|\d+[.)]\s+)", "", s)
-    s = re.sub(r"\\([\\`*_{}\[\]()#+\-.!|~<>])", r"\1", s)
-    s = s.replace("\n", " ")
-    return re.sub(r"[ \t]+", " ", s).strip()
-
-
 def strip_num_marker(line: Line) -> None:
     """Remove the leading "1." / "a)" from a line that is a list item (keeps it in `line.marker`)."""
     if line.marker and line.marker[0] == "num" and line.runs:

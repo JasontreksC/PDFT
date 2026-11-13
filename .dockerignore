@@ -15,4 +15,8 @@ PDFT_Colab
 PDFT_Colab.zip
 
 test
-docling_host
+
+# OAuth client secrets (mounted at run time, never baked into an image)
+pdft_client_secert.json
+*client_secret*.json
+*client_secert*.json

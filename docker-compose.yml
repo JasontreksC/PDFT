@@ -1,19 +1,68 @@
+# DB/Redis 는 공유 스택(~/db)이 관리. 여기는 앱 + docling만 띄움.
+# 기동 순서: cd ~/db && docker compose --profile db up -d  ->  cd ~/PDFT && docker compose up -d
+
 services:
   pdft:
     build: .
     image: pdft:latest
     container_name: pdft
     ports:
-      # Bound to localhost on purpose: the app has no login and uses your API keys.
-      - "127.0.0.1:8000:8000"
+      # Published on all interfaces (0.0.0.0). People sign in with a Google account (PDFT_AUTH=google); see README "로그인과 회원".
+      # Host port comes from PDFT_PORT (.env), default 9000.
+      - "0.0.0.0:${PDFT_PORT:-9000}:9000"
     volumes:
       - ./data:/data              # uploaded PDFs, translations, internal context (private)
       - ./config:/config          # models.json (endpoints / API keys / model names)
       - ./fonts:/app/user_fonts   # drop extra .ttf/.otf files here; restart to pick them up
-      - ./docling_host:/docling_host:ro   # lets the container read the token of the local Docling service (docling_host/run.sh)
+      # the OAuth client downloaded from Google Cloud Console: mounted read-only, never part of the image or the repo
+      - ${PDFT_GOOGLE_CLIENT_JSON:-./pdft_client_secert.json}:/run/secrets/google_oauth.json:ro
     env_file:
       - path: .env                # optional: OPENAI_API_KEY=..., referenced as ${OPENAI_API_KEY} in models.json
         required: false
+    environment:
+      - PDFT_AUTH=${PDFT_AUTH:-google}                 # google | off (off = no login: single-user installs only)
+      - PDFT_GOOGLE_CLIENT_FILE=/run/secrets/google_oauth.json
+      - PDFT_DB_HOST=db-postgres
+      - PDFT_DB_USER=pdft
+      - PDFT_DB_NAME=pdft
+      - PDFT_DB_PASSWORD=${POSTGRES_PASSWORD:?.env에 POSTGRES_PASSWORD를 정하세요 (README "로그인과 회원")}
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach Ollama / LM Studio running on the host
+    networks:
+      - default                   # talks to docling
+      - dbnet                     # 공유 DB (~/db): db-postgres
+      - tunnel                    # shared with the cloudflared stack: tunnel service URL is http://pdft:9000
+    depends_on:
+      docling:
+        condition: service_started   # not waited for: the app copes with a Docling that is still loading
     restart: unless-stopped
+
+  docling:
+    # Layout analysis / OCR for "기본 번역" (Docling regions are the hints that group the text layer into frames).
+    # CPU only: no GPU is passed through. Reached by the app as http://docling:8765 over the compose network; the port is
+    # deliberately not published to the host.
+    build:
+      context: .
+      dockerfile: docling/Dockerfile
+    image: pdft-docling:latest
+    container_name: pdft-docling
+    volumes:
+      - docling-models:/models    # downloaded model weights (the first analysis downloads them once)
+    environment:
+      - DOCLING_THREADS=${DOCLING_THREADS:-}   # default: all CPU cores
+      - PDFT_DOCLING_TOKEN=${PDFT_DOCLING_TOKEN:-}   # optional shared secret (also given to pdft via .env)
+    restart: unless-stopped
+
+# 기존 로컬 DB (볼륨: pdft_pg-data) 는 ~/db 로 이관 후 백업으로 보관.
+# 백업 예: docker compose exec db-postgres pg_dump -U pdft pdft  (또는 구 db 컨테이너에서 pg_dumpall)
+
+volumes:
+  docling-models:
+
+networks:
+  dbnet:
+    external: true
+    name: dbnet
+  tunnel:
+    external: true                # shared with ~/cloudflared; create once: docker network create tunnel
+    name: tunnel

@@ -33,6 +33,15 @@ def render_png(pdf: Path, pno: int, scale: float) -> bytes:
         return pix.tobytes("png")
 
 
+def render_png_long(pdf: Path, pno: int, long_side: int) -> bytes:
+    """Page pno as PNG whose longer edge is `long_side` px (the screenshot a vision model reads)."""
+    with PYMU_LOCK:
+        page = _open(pdf)[pno]
+        r = page.rect
+        z = max(0.3, min(6.0, long_side / max(r.width, r.height)))
+        return page.get_pixmap(matrix=pymupdf.Matrix(z, z), alpha=False).tobytes("png")
+
+
 def forget(pdf: Path) -> None:
     with PYMU_LOCK:
         for key in [k for k in _docs if k[0] == str(pdf)]:

@@ -72,8 +72,9 @@ class ComposeManager:
                 snapshot = copy.deepcopy(job.doc())      # the editor may keep changing the live doc
                 default = self.settings.data.get("default_font")
                 tmp = job.dir / "composed.next.pdf"
+                flow = self.settings.data.get("layout_mode") == "flow"
                 info = await asyncio.to_thread(compose, snapshot, self.fonts, default, tmp, job.source,
-                                               self._fit.setdefault(job.id, {}))
+                                               self._fit.setdefault(job.id, {}), flow)
                 tmp.replace(job.composed)
                 job.set_positions(info["positions"])
                 c.update(version=c.get("version", 0) + 1, pages=info["pages"], error=None,

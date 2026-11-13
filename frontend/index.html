@@ -3,151 +3,382 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PDFT — PDF 번역기</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6df6'/%3E%3Cpath d='M9 8h9a5 5 0 010 10h-5v6H9z' fill='%23fff'/%3E%3C/svg%3E">
+  <title>PDFT — 원본 모습 그대로 PDF 번역</title>
+  <meta name="description" content="PDF의 표·그림·레이아웃은 그대로 두고 글만 번역합니다. 가입 없이 바로 시작하세요.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23191a1d'/%3E%3Cpath d='M10 8h8.5a5.5 5.5 0 010 11H14v5h-4z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/style.css">
-  <link rel="stylesheet" href="/api/fonts.css">
 </head>
-<body>
-  <header id="menubar">
-    <div class="brand"><span class="logo">P</span>PDFT</div>
-    <button class="menu-btn" id="btn-sidebar" title="쪽 목록 보이기/숨기기" aria-pressed="true">▤ 쪽</button>
+<body class="at-home">
 
-    <nav id="menus">
-      <div class="menu" data-menu="file">
-        <button class="menu-btn" aria-haspopup="true">파일</button>
-        <div class="dropdown" role="menu">
-          <button class="item" id="m-open">PDF 열기…</button>
-          <button class="item" id="m-export">번역된 PDF 저장</button>
-          <button class="item" id="m-export-sel" title="왼쪽 목록에서 선택한 쪽만 새 PDF로 저장합니다.">선택한 쪽만 PDF 저장</button>
-          <div class="sep"></div>
-          <div class="group-title">최근 작업</div>
-          <div id="recent" class="recent"></div>
-          <button class="item danger" id="m-delete-others" hidden>다른 작업 모두 삭제</button>
+  <!-- ============================================================ 홈 -->
+  <div id="home">
+    <header class="h-nav">
+      <a class="brand" href="#/" aria-label="PDFT 홈"><span class="logo">P</span>PDFT</a>
+      <nav class="h-links"><a class="btn ghost" id="h-dash" href="#/admin" hidden>대시보드</a><a class="btn ghost" id="h-link" href="#/docs">내 문서</a></nav>
+    </header>
+
+    <main class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">PDF 번역기</p>
+        <h1>PDF, 원본 모습 그대로 번역하세요</h1>
+        <p class="lead">표와 그림, 글의 자리는 그대로 두고 글만 바꿔요. PDF를 올리고 번역 방식만 고르면 돼요.</p>
+        <p id="login-msg" class="notice" role="alert" hidden></p>
+        <div class="cta">
+          <a class="btn primary big" id="cta" href="#/docs"><svg class="g" width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span id="cta-label">시작하기</span>
+            <svg class="arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+          <span class="muted" id="cta-note"></span>
         </div>
       </div>
 
-      <div class="menu" data-menu="translate">
-        <button class="menu-btn" aria-haspopup="true">번역</button>
-        <div class="dropdown" role="menu">
-          <label class="field">
-            <span>번역할 언어</span>
-            <select id="s-lang"></select>
-          </label>
-          <div class="sep"></div>
-          <button class="item" id="m-start">번역 시작</button>
-          <button class="item" id="m-stop">번역 중지</button>
-          <button class="item" id="m-rebuild" title="문서를 다시 분석합니다 (저장된 Docling 결과가 있으면 그것을 재사용). 원문이 같은 글의 번역은 그대로 옮겨집니다.">구조 다시 정리</button>
-          <button class="item danger" id="m-reset" title="선택한 쪽의 번역만 지웁니다 (전체 선택이면 내부 컨텍스트도 초기화).">번역 초기화</button>
-          <button class="item danger" id="m-delete">이 작업 삭제</button>
-        </div>
-      </div>
-
-      <div class="menu" data-menu="model">
-        <button class="menu-btn" aria-haspopup="true">모델 <small id="model-name"></small></button>
-        <div class="dropdown wide" role="menu">
-          <div class="group-title">번역 모델</div>
-          <div id="model-list" class="model-list"></div>
-          <div id="model-errors" class="warn" hidden></div>
-          <div class="sep"></div>
-          <div class="group-title">컨텍스트 한도</div>
-          <div class="ctx-row">
-            <strong id="ctx-limit">—</strong>
-            <span id="ctx-source" class="muted"></span>
-            <button class="link" id="ctx-refresh" title="모델 API에서 다시 조회">다시 조회</button>
+      <!-- 같은 자리에서 글만 바뀌는 모습 -->
+      <div class="demo" aria-hidden="true">
+        <div class="sheet">
+          <div class="ly src">
+            <div class="b t1">Annual Report 2025</div>
+            <div class="b t2">Revenue grew 18% over the previous year, driven by strong demand in new markets.</div>
+            <div class="b t3">Figure 1. Quarterly revenue</div>
+            <div class="b t4">The outlook for next year remains positive across all regions.</div>
           </div>
-          <div class="gauge-big" id="gauge-big"><i></i></div>
-          <div class="muted small" id="gauge-detail"></div>
-          <label class="check" title="번역한 내용을 모아 짧은 맥락 요약과 용어집으로 정리합니다. 요청마다 보내는 것은 이 요약과 용어집뿐입니다."><input type="checkbox" id="s-auto"> 맥락 요약 자동 갱신</label>
-          <div class="sep"></div>
-          <div class="group-title">속도</div>
-          <label class="slider-row" title="동시에 번역할 쪽 수. 높일수록 빠르지만 API 요청 한도(429)에 걸리기 쉽고, 같은 시점의 쪽끼리는 서로의 번역·용어를 보지 못합니다 (1 = 순차).">
-            <span>동시 요청</span>
-            <input type="range" id="s-conc" min="1" max="16" step="1">
-            <output id="s-conc-out"></output>
-          </label>
-          <div class="muted small" style="padding:0 10px 2px">쪽 단위로 동시에 번역합니다. 1이면 순차(용어 일관성 최대).</div>
-          <div class="row-btns">
-            <button class="btn small" id="ctx-compress">요약 지금 갱신</button>
-            <button class="btn small ghost" id="models-reload">models.json 다시 읽기</button>
+          <div class="ly dst">
+            <div class="b t1">2025 연간 보고서</div>
+            <div class="b t2">신규 시장의 강한 수요에 힘입어 매출이 전년 대비 18% 성장했습니다.</div>
+            <div class="b t3">그림 1. 분기별 매출</div>
+            <div class="b t4">내년 전망은 모든 지역에서 긍정적입니다.</div>
           </div>
+          <svg class="fig" viewBox="0 0 262 120" preserveAspectRatio="none">
+            <path d="M24 100h222" stroke="#cfcfd4" stroke-width="1"/>
+            <rect x="44" y="62" width="30" height="38" rx="2" fill="#c9d3f5"/>
+            <rect x="94" y="48" width="30" height="52" rx="2" fill="#a9b9f0"/>
+            <rect x="144" y="36" width="30" height="64" rx="2" fill="#7f97e8"/>
+            <rect x="194" y="18" width="30" height="82" rx="2" fill="#2f55d4"/>
+          </svg>
+          <span class="pno">12</span>
+          <i class="scan"></i>
         </div>
       </div>
+    </main>
 
-      <div class="menu" data-menu="font">
-        <button class="menu-btn" aria-haspopup="true">글꼴 <small id="font-name"></small></button>
-        <div class="dropdown" role="menu">
-          <div class="group-title">기본 글꼴 (번역문 전체)</div>
-          <div id="font-list" class="font-list"></div>
-        </div>
-      </div>
-    </nav>
-
-    <div class="spacer"></div>
-
-    <div class="analyze" id="analyze-box">
-      <label class="an-force" id="an-force" title="켜면 로컬 Docling이 읽은 구역을 '이 줄들이 한 글인가' 판단의 힌트로 씁니다. 스캔 쪽(텍스트 층 없음)이 있으면 글자를 읽기 위해 항상 사용합니다."><input type="checkbox" id="s-parser"> Docling 힌트</label>
-      <span id="an-est" class="an-est"></span>
-      <button id="btn-analyze" class="btn" disabled>문서 분석</button>
-    </div>
-
-    <button id="gauge" class="gauge" title="요청마다 보내는 맥락 / 모델 한도">
-      <span class="g-label">컨텍스트</span>
-      <span class="g-bar"><i class="g-fill"></i></span>
-      <span class="g-num">— / —</span>
+    <button type="button" class="flow-hint" id="flow-hint">
+      <span>아래로 스크롤해서 번역 과정을 보세요</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
     </button>
-    <button id="btn-main" class="btn primary" disabled>번역 시작</button>
-    <button id="btn-export" class="btn" disabled>PDF 저장</button>
-  </header>
 
-  <div id="workspace">
-  <aside id="sidebar" aria-label="쪽 목록">
-    <div class="sb-head">
-      <div class="sb-title"><strong>쪽</strong> <span id="sb-count" class="muted"></span></div>
-      <div class="sb-btns">
-        <button class="btn small" id="sb-all" title="모든 쪽 선택">전체 선택</button>
-        <button class="btn small ghost" id="sb-none" title="선택 모두 해제">전체 해제</button>
+    <section class="flow" id="flow" aria-label="번역 과정" data-stage="1">
+      <div class="flow-stage">
+        <div class="flow-grid">
+          <ol class="flow-steps">
+            <li class="flow-step" data-step="1" aria-current="step">
+              <span class="flow-num" aria-hidden="true">1</span>
+              <div class="flow-txt"><strong>원본 읽기</strong><p>올린 PDF의 쪽을 그대로 펼쳐요.</p></div>
+            </li>
+            <li class="flow-step" data-step="2">
+              <span class="flow-num" aria-hidden="true">2</span>
+              <div class="flow-txt"><strong>레이아웃 분석</strong><p>제목, 본문, 그림, 표가 어디에 있는지 구역을 찾아요.</p></div>
+            </li>
+            <li class="flow-step" data-step="3">
+              <span class="flow-num" aria-hidden="true">3</span>
+              <div class="flow-txt"><strong>텍스트 추출</strong><p>번역할 글만 골라 꺼내요. 그림과 표의 선, 수식은 건드리지 않아요.</p></div>
+            </li>
+            <li class="flow-step" data-step="4">
+              <span class="flow-num" aria-hidden="true">4</span>
+              <div class="flow-txt"><strong>번역</strong><p>꺼낸 글을 AI 번역 모델이 문맥과 용어를 맞춰 번역해요.</p></div>
+            </li>
+            <li class="flow-step" data-step="5">
+              <span class="flow-num" aria-hidden="true">5</span>
+              <div class="flow-txt"><strong>조판</strong><p>번역문을 원래 자리에 다시 앉혀요. 길어지면 글자 크기와 자리를 맞춰요.</p></div>
+            </li>
+          </ol>
+
+          <div class="flow-page" aria-hidden="true">
+            <div class="flow-orig flow-ot" id="flow-o-t1" style="--i:0">
+              <span class="flow-en">Annual Report 2025</span>
+              <span class="flow-ko">2025 연간 보고서</span>
+            </div>
+            <div class="flow-orig flow-op1" id="flow-o-p1" style="--i:1">
+              <span class="flow-en">Revenue grew 18% over the previous year on strong demand in new markets. Margins improved in every quarter. We entered three new regions this spring.</span>
+              <span class="flow-ko">신규 시장의 탄탄한 수요로 매출이 전년보다 18% 늘었습니다. 이익률은 매 분기 좋아졌습니다. 올봄에는 세 지역에 새로 진출했습니다.</span>
+            </div>
+            <svg class="flow-fig" viewBox="0 0 200 90" preserveAspectRatio="none">
+              <path d="M8 78h184" stroke="#cfcfd4" stroke-width="1"/>
+              <rect x="24" y="48" width="24" height="30" rx="2" fill="#c9d3f5"/>
+              <rect x="66" y="38" width="24" height="40" rx="2" fill="#a9b9f0"/>
+              <rect x="108" y="28" width="24" height="50" rx="2" fill="#7f97e8"/>
+              <rect x="150" y="14" width="24" height="64" rx="2" fill="#2f55d4"/>
+            </svg>
+            <div class="flow-orig flow-ocap" id="flow-o-cap" style="--i:2">
+              <span class="flow-en">Figure 1. Quarterly revenue</span>
+              <span class="flow-ko">그림 1. 분기별 매출</span>
+            </div>
+            <table class="flow-tab" id="flow-o-tab" style="--i:3">
+              <tr>
+                <td><span class="flow-en">Region</span><span class="flow-ko">지역</span></td>
+                <td><span class="flow-en">Sales</span><span class="flow-ko">매출</span></td>
+                <td><span class="flow-en">Growth</span><span class="flow-ko">성장</span></td>
+              </tr>
+              <tr>
+                <td><span class="flow-en">North</span><span class="flow-ko">북부</span></td>
+                <td>42</td>
+                <td>+9%</td>
+              </tr>
+            </table>
+            <div class="flow-orig flow-op2" id="flow-o-p2" style="--i:4">
+              <span class="flow-en">The outlook for next year stays positive in all regions. We will keep funding research and local teams. Thanks to our customers and partners everywhere.</span>
+              <span class="flow-ko">내년 전망은 모든 지역에서 밝습니다. 연구와 현지 팀에 대한 투자를 이어가겠습니다. 고객과 협력사 여러분께 감사드립니다.</span>
+            </div>
+            <span class="flow-pno">12</span>
+            <i class="flow-scan"></i>
+            <span class="flow-box flow-bt" style="--t:.03"><i>제목</i></span>
+            <span class="flow-box flow-bp1" style="--t:.15"><i>본문</i></span>
+            <span class="flow-box flow-bfig" style="--t:.33"><i>그림</i></span>
+            <span class="flow-box flow-bcap" style="--t:.5"><i>캡션</i></span>
+            <span class="flow-box flow-btab" style="--t:.6"><i>표</i></span>
+            <span class="flow-box flow-bp2" style="--t:.78"><i>본문</i></span>
+            <span class="flow-keep flow-kfig">그대로 둠</span>
+            <span class="flow-keep flow-ktab">그대로 둠</span>
+            <span class="flow-badge">레이아웃은 그대로, 글만 번역</span>
+          </div>
+
+          <div class="flow-tray" aria-hidden="true">
+            <strong class="flow-tray-t">꺼낸 글</strong>
+            <div class="flow-chips">
+              <div class="flow-chip" style="--i:0" data-origin="flow-o-t1">
+                <span class="flow-chip-en"><span class="flow-long">Annual Report 2025</span><span class="flow-short">Annual Report…</span></span>
+                <span class="flow-chip-ko"><span class="flow-long">2025 연간 보고서</span><span class="flow-short">2025 연간 보고서</span></span>
+              </div>
+              <div class="flow-chip" style="--i:1" data-origin="flow-o-p1">
+                <span class="flow-chip-en"><span class="flow-long">Revenue grew 18% over the previous year on strong demand in new markets. Margins improved in every quarter. We entered three new regions this spring.</span><span class="flow-short">Revenue grew 18%…</span></span>
+                <span class="flow-chip-ko"><span class="flow-long">신규 시장의 탄탄한 수요로 매출이 전년보다 18% 늘었습니다. 이익률은 매 분기 좋아졌습니다. 올봄에는 세 지역에 새로 진출했습니다.</span><span class="flow-short">매출이 18% 성장…</span></span>
+              </div>
+              <div class="flow-chip" style="--i:2" data-origin="flow-o-cap">
+                <span class="flow-chip-en"><span class="flow-long">Figure 1. Quarterly revenue</span><span class="flow-short">Figure 1…</span></span>
+                <span class="flow-chip-ko"><span class="flow-long">그림 1. 분기별 매출</span><span class="flow-short">그림 1…</span></span>
+              </div>
+              <div class="flow-chip" style="--i:3" data-origin="flow-o-tab">
+                <span class="flow-chip-en"><span class="flow-long">Region · Sales · Growth · North</span><span class="flow-short">Region · Sales…</span></span>
+                <span class="flow-chip-ko"><span class="flow-long">지역 · 매출 · 성장 · 북부</span><span class="flow-short">지역 · 매출…</span></span>
+              </div>
+              <div class="flow-chip" style="--i:4" data-origin="flow-o-p2">
+                <span class="flow-chip-en"><span class="flow-long">The outlook for next year stays positive in all regions. We will keep funding research and local teams. Thanks to our customers and partners everywhere.</span><span class="flow-short">The outlook stays…</span></span>
+                <span class="flow-chip-ko"><span class="flow-long">내년 전망은 모든 지역에서 밝습니다. 연구와 현지 팀에 대한 투자를 이어가겠습니다. 고객과 협력사 여러분께 감사드립니다.</span><span class="flow-short">내년 전망은 밝음…</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-foot">
+          <div class="flow-progress" aria-hidden="true"><i></i></div>
+          <a class="btn primary flow-cta" href="#/docs">지금 번역해 보기</a>
+        </div>
       </div>
-      <button class="btn small" id="sb-revert" title="선택한 쪽의 번역과 서식 변경을 지우고 원본 상태로 되돌립니다 (다른 쪽은 그대로).">↩ 번역 전으로</button>
-      <div class="sb-hint muted">선택한 쪽만 번역·초기화·저장합니다. Shift+클릭: 범위 선택</div>
-    </div>
-    <div id="thumbs" role="listbox" aria-multiselectable="true"></div>
-  </aside>
-  <main id="viewer">
-    <div id="empty">
-      <div class="drop">
-        <div class="drop-icon">PDF</div>
-        <h1>번역할 PDF를 끌어다 놓으세요</h1>
-        <p>PDF의 글자와 위치를 그대로 읽어 원본 쪽 위에 번역문을 얹습니다. 선·표·그림·로고는 원본 그대로 남습니다.</p>
-        <button class="btn primary" id="btn-pick">파일 선택</button>
+    </section>
+
+    <section class="steps" aria-label="사용 방법">
+      <ol>
+        <li><span class="n">1</span><strong>로그인하고 PDF 올리기</strong><p>Google 계정으로 로그인하고 파일을 끌어다 놓으세요.</p></li>
+        <li><span class="n">2</span><strong>번역 방식 고르기</strong><p>대부분은 빠른 기본 번역, 복잡한 문서는 고급 번역.</p></li>
+        <li><span class="n">3</span><strong>확인하고 저장</strong><p>번역된 쪽을 살펴보고 PDF로 내려받아요.</p></li>
+      </ol>
+    </section>
+
+    <footer class="h-foot">번역을 위해 문서의 글이 AI 번역 모델로 전송돼요. 고급 번역은 쪽 이미지도 함께 보내요. 올린 문서는 본인과 서비스 관리자만 볼 수 있어요.
+      <nav class="h-legal"><a href="/privacy_policy.html">개인정보 처리방침</a></nav>
+    </footer>
+  </div>
+
+  <!-- ============================================================ 내 문서 (작업 공간으로 들어가기 전) -->
+  <div id="docs">
+    <header class="h-nav">
+      <a class="brand" href="#/" aria-label="PDFT 홈"><span class="logo">P</span>PDFT</a>
+      <div class="docs-top">
+        <a class="btn ghost" id="docs-dash" href="#/admin" hidden>대시보드</a>
+        <div class="pop right" id="d-acct-pop" hidden>
+          <button class="avatar pop-btn" id="d-acct-btn" aria-haspopup="true" aria-expanded="false" aria-label="내 계정" title="내 계정"><img alt="" referrerpolicy="no-referrer" hidden><span></span></button>
+          <div class="sheet-menu" role="menu">
+            <div class="acct-id"><strong id="d-acct-name"></strong><span id="d-acct-email" class="muted"></span></div>
+            <div class="sep"></div>
+            <a class="item" role="menuitem" href="/privacy_policy.html" target="_blank" rel="noopener">개인정보 처리방침</a>
+            <button class="item" role="menuitem" id="d-logout">로그아웃</button>
+            <button class="item danger" role="menuitem" id="d-leave">회원 탈퇴</button>
+          </div>
+        </div>
       </div>
+    </header>
+
+    <main class="docs-main">
+      <div class="docs-head">
+        <div><h1>내 문서</h1><p class="muted" id="docs-sum"></p></div>
+        <button class="btn primary" id="docs-add" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          PDF 추가
+        </button>
+      </div>
+      <div class="docs-bar" id="docs-bar" hidden>
+        <label class="sb-all"><input type="checkbox" id="docs-all"> <span>전체 선택</span></label>
+        <span id="docs-count" class="muted"></span>
+        <input id="docs-q" type="search" placeholder="파일 이름 검색" aria-label="파일 이름 검색">
+        <button class="btn small stop" id="docs-del" type="button" disabled>선택 삭제</button>
+      </div>
+      <div class="docs-grid" id="docs-grid"></div>
+    </main>
+  </div>
+
+  <!-- ============================================================ 작업 공간 -->
+  <div id="work">
+    <header id="bar">
+      <a class="brand" href="#/" title="홈으로" aria-label="PDFT 홈"><span class="logo">P</span><span class="brand-name">PDFT</span></a>
+      <a class="btn" id="back-docs" href="#/docs" title="내 문서 목록으로">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+        <span>내 문서</span>
+      </a>
+
+      <div id="doc">
+        <div id="doc-name"></div>
+        <div id="doc-status" role="status" aria-live="polite"></div>
+      </div>
+
+      <div id="controls">
+        <label class="pick" title="번역할 언어">
+          <span class="sr">번역할 언어</span>
+          <select id="s-lang"></select>
+        </label>
+
+        <div class="pop" id="mode-pop">
+          <button class="btn pop-btn" id="mode-btn" aria-haspopup="true" aria-expanded="false">
+            <span id="mode-label">기본 번역</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="sheet-menu" role="menu" aria-label="번역 방식">
+            <button class="opt" role="menuitemradio" data-mode="basic">
+              <span class="opt-t">기본 번역</span>
+              <span class="opt-d">글만 읽어 빠르게 번역해요. 대부분의 문서에 알맞아요.</span>
+            </button>
+            <button class="opt" role="menuitemradio" data-mode="advanced">
+              <span class="opt-t">고급 번역</span>
+              <span class="opt-d">쪽의 모습까지 함께 보고 번역해요. 수식이나 도표가 많은 문서에 좋고, 시간이 더 걸려요.</span>
+            </button>
+          </div>
+        </div>
+
+        <button id="btn-main" class="btn primary" disabled>번역 시작</button>
+        <button id="btn-export" class="btn" aria-label="PDF 저장" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>
+          <span>PDF 저장</span>
+        </button>
+
+        <div class="pop right" id="more-pop">
+          <button class="btn icon pop-btn" aria-haspopup="true" aria-expanded="false" aria-label="더 보기" title="더 보기">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+          </button>
+          <div class="sheet-menu" role="menu">
+            <button class="item" role="menuitem" id="m-open">PDF 추가</button>
+            
+            <button class="item" role="menuitem" id="m-export-sel">선택한 쪽만 저장</button>
+            <div class="sep"></div>
+            <button class="item" role="menuitem" id="m-reset">번역 지우기</button>
+            <button class="item danger" role="menuitem" id="m-delete">문서 삭제</button>
+          </div>
+        </div>
+      </div>
+
+      <a class="btn" id="dash-link" href="#/admin" hidden>대시보드</a>
+      <div class="pop right" id="acct-pop" hidden>
+        <button class="avatar pop-btn" id="acct-btn" aria-haspopup="true" aria-expanded="false" aria-label="내 계정" title="내 계정"><img alt="" referrerpolicy="no-referrer" hidden><span></span></button>
+        <div class="sheet-menu" role="menu">
+          <div class="acct-id"><strong id="acct-name"></strong><span id="acct-email" class="muted"></span></div>
+          <div class="sep"></div>
+          <a class="item" role="menuitem" href="/privacy_policy.html" target="_blank" rel="noopener">개인정보 처리방침</a>
+          <button class="item" role="menuitem" id="m-logout">로그아웃</button>
+          <button class="item danger" role="menuitem" id="m-leave">회원 탈퇴</button>
+        </div>
+      </div>
+
+      <div id="prog" aria-hidden="true"><i></i></div>
+    </header>
+
+    <div id="workspace">
+      <aside id="sidebar" aria-label="쪽 목록">
+        <div class="sb-head">
+          <label class="sb-all"><input type="checkbox" id="sb-all"> <span>전체 선택</span></label>
+          <span id="sb-count" class="muted"></span>
+        </div>
+        <p id="sb-hint" class="sb-hint">선택한 쪽만 번역해요.</p>
+        <div id="thumbs" role="listbox" aria-multiselectable="true" aria-label="쪽"></div>
+      </aside>
+
+      <main id="viewer">
+        <div id="pages"></div>
+      </main>
     </div>
-    <div id="pages"></div>
-  </main>
+
+    <div id="zoom" role="group" aria-label="확대/축소">
+      <button id="z-out" aria-label="축소">−</button>
+      <button id="z-fit" title="너비에 맞춤">100%</button>
+      <button id="z-in" aria-label="확대">＋</button>
+    </div>
   </div>
 
-  <div id="lay-bar" hidden>
-    <strong>분석 보기</strong>
-    <label title="로컬 Docling 서비스가 인식한 구역 그대로"><input type="checkbox" id="lay-doc" checked><i class="sw sw-doc"></i> Docling 구역 <span id="lay-doc-n" class="muted"></span></label>
-    <label title="PDF 텍스트 층에서 만든 글상자 (번역 단위)"><input type="checkbox" id="lay-fr" checked><i class="sw sw-fr"></i> 글상자 <span id="lay-fr-n" class="muted"></span></label>
-    <span id="lay-note" class="muted"></span>
+  <!-- ============================================================ 관리자 대시보드 -->
+  <div id="admin">
+    <header class="a-bar">
+      <a class="brand" href="#/" aria-label="PDFT 홈"><span class="logo">P</span><span class="brand-name">PDFT</span></a>
+      <h1>관리자 대시보드</h1>
+      <a class="btn ghost" href="#/docs">내 문서로</a>
+    </header>
+
+    <!-- 한눈에 보기: 문서 · 활동 기록 · 회원 -->
+    <main class="a-main" id="a-dash">
+      <div class="tiles" id="a-tiles"></div>
+      <div class="a-tools">
+        <div class="seg" id="a-tabs" role="tablist">
+          <button role="tab" data-tab="jobs" class="on">문서</button>
+          <button role="tab" data-tab="events">활동 기록</button>
+          <button role="tab" data-tab="users">회원</button>
+          <button role="tab" data-tab="policy">처리방침</button>
+        </div>
+        <label class="pick"><span class="sr">회원</span><select id="a-user"></select></label>
+        <input id="a-q" type="search" placeholder="파일 이름 검색" aria-label="파일 이름 검색">
+      </div>
+      <div class="a-list" id="a-jobs"></div>
+      <div class="a-list" id="a-events" hidden></div>
+      <div class="a-list" id="a-users" hidden></div>
+      <form class="a-list pol" id="a-policy" hidden>
+        <div class="pol-head">
+          <div><strong>개인정보 처리방침의 빈칸</strong><span class="muted" id="pol-sum"></span></div>
+          <a class="btn" href="/privacy_policy.html" target="_blank" rel="noopener">페이지 열기</a>
+          <button class="btn primary" type="submit" id="pol-save">저장</button>
+        </div>
+        <div id="pol-fields"></div>
+      </form>
+    </main>
+
+    <!-- 문서 하나를 쪽마다 검토 -->
+    <main class="a-main wide" id="a-review" hidden>
+      <div class="r-head">
+        <a class="btn" href="#/admin">← 대시보드</a>
+        <div class="r-title"><strong id="r-name"></strong><span id="r-owner" class="muted"></span></div>
+        <a class="btn" id="r-download" hidden>번역본 내려받기</a>
+      </div>
+      <dl class="r-facts" id="r-facts"></dl>
+      <div class="r-body">
+        <nav class="r-pages" id="r-pages" aria-label="쪽"></nav>
+        <section class="r-view">
+          <div class="seg" id="r-mode">
+            <button data-v="out" class="on">번역본</button>
+            <button data-v="orig">원본</button>
+            <button data-v="boxes" title="원본 위에 글상자(빨강), 번역하지 않고 남긴 글(파랑), Docling 구역(초록 점선)을 그려요">분석</button>
+          </div>
+          <div class="r-sheet" id="r-sheet"><img id="r-img" alt=""><div id="r-boxes"></div></div>
+        </section>
+        <aside class="r-side" id="r-side"></aside>
+      </div>
+    </main>
   </div>
 
-  <div id="zoom">
-    <button id="z-layout" aria-pressed="false" title="분석 결과 보기: Docling이 인식한 구역과 글상자를 원본 쪽 위에 그립니다">▦ 분석</button>
-    <button id="z-out" aria-label="축소">−</button>
-    <button id="z-fit" title="너비에 맞춤">100%</button>
-    <button id="z-in" aria-label="확대">＋</button>
-  </div>
+  <div id="veil" aria-hidden="true"><div>여기에 놓으면 문서를 추가해요</div></div>
 
-  <footer id="statusbar">
-    <span id="st-msg">PDF를 열어 시작하세요.</span>
-    <span class="st-bar"><i id="st-fill"></i></span>
-    <span id="st-right" class="muted"></span>
-  </footer>
-
-  <!-- 글을 클릭하면 바로 위에 뜨는 컨트롤 패널: 글꼴 · 굵기 · 크기 · 색 (이 네 가지만) -->
-  <div id="panel" hidden role="toolbar" aria-label="텍스트 서식">
+  <!-- 글을 누르면 바로 위에 뜨는 서식 패널: 글꼴 · 굵기 · 크기 · 색 -->
+  <div id="panel" hidden role="toolbar" aria-label="글 서식">
     <label class="p-font"><span>글꼴</span><select id="p-font"></select></label>
     <label class="p-weight"><span>굵기</span><input type="range" id="p-weight" min="0" max="8" step="1"><output id="p-weight-out">400</output></label>
     <label class="p-size"><span>크기</span>
@@ -159,7 +390,8 @@
   </div>
 
   <div id="toast" role="status" aria-live="polite" hidden></div>
-  <input type="file" id="file-input" accept="application/pdf,.pdf" hidden>
+  <input type="file" id="file-input" accept="application/pdf,.pdf" multiple hidden>
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/home.js"></script>
 </body>
 </html>

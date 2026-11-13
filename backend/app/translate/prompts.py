@@ -7,8 +7,63 @@ _T_RE = re.compile(r'<t\s+id="(\d+)"[^>]*>(.*?)</t>', re.S)
 _TERM_RE = re.compile(r'<term\s+src="(.*?)"\s*>(.*?)</term>', re.S)
 _SUMMARY_RE = re.compile(r"<summary>(.*?)</summary>", re.S)
 
+LAYOUTS = "heading, paragraph, list_item, caption, label, footnote, header, footer, other"
+
 
 def translate_system(lang: str) -> str:
+    return f"""You are a professional document translator working inside a PDF translation pipeline.
+You receive the screenshot of ONE page of a document. Pick out the text on it that is worth translating and translate it into {lang}.
+
+WHAT TO EXTRACT
+- Only text that should be translated: headings, paragraphs, list items, captions, footnotes, the words of figure and table labels, running page headers/footers that contain words.
+- Table of contents, index and list-of-figures lines: give only what is worth translating, the number or label at the start and the title. Leave out the dot leader ("........") and the page number at the end of the line.
+- Leave out everything that must not be translated: formulas and equations, bare numbers, symbols, code, table cells that hold only numbers, a lone page number, dot leaders and rules made of characters, a lone URL or e-mail address, bare identifiers.
+- Split along the layout, by visual blocks: one item per heading, paragraph, list item, caption, label or table cell. A paragraph is ONE item however many lines it takes. Never join text of different blocks or table cells, and never split one paragraph. A paragraph that continues at the top of the next column is still one item. List the items in reading order.
+- A wide blank gap inside a line (a tab or a column alignment) separates two different items: what stands before the gap and what stands after it are separate items.
+- In lists, tables of contents and lists of figures or tables, a number or label at the start of a line ("Figure 1.", "2.1", "(a)", "•") that is set apart from the text after it by such a gap is an item of its own with layout "label"; the text after it is a "list_item" (a "caption" in a list of figures or tables). When that text goes on in the following lines (hanging indent), those lines belong to the "lines" of the text item.
+  Example: the line "Figure 1.   Hexadecimal representation of bit patterns ....... 8" of a list of figures gives two items: {{"id": 2, "layout": "label", "lines": ["Figure 1."], "translation": "..."}} and {{"id": 3, "layout": "caption", "lines": ["Hexadecimal representation of bit patterns"], "translation": "..."}}.
+
+FIELDS OF AN ITEM
+- "id": 1, 2, 3 ... in order.
+- "layout": one of {LAYOUTS}.
+- "align": how the text sits in its place on the page: "left", "center" or "right" (justified text counts as "left"). Look at where the text starts and ends relative to the text around it: a heading in the middle of the page is "center", a number or label hugging the right margin is "right", a list item or a paragraph that merely fills its line is "left".
+- "lines": ONLY the part of the item that is worth translating, copied from the page, ONE STRING PER PRINTED LINE, top to bottom, the way the lines are broken on the page (a one-line heading is a list with one string). What you do copy must be exact, character for character (keep a hyphen that ends a line); do not correct, reorder, shorten, summarise or translate it. What is not worth translating is NOT copied: a dot leader ("........") and the page number at the end of a table-of-contents line, a bare number, a formula, a symbol. The strings are matched against the PDF's own text and the line breaks tell where each piece of the item sits, so they must be faithful. Write plain text: no markdown, no LaTeX.
+- "translation": the translation into {lang}. The page is re-typeset from it, so never add line breaks.
+
+TRANSLATION RULES
+1. Translate the meaning of the whole item; use the background notes and the glossary so terms stay consistent. Use glossary terms exactly as given.
+2. Inline emphasis: if words inside the item are clearly bold, write them **bold**; clearly italic, *italic*. Do not add emphasis that is not on the page. A literal asterisk is written \\*.
+3. Do not translate or alter numbers, units, formulas, code, URLs, e-mail addresses, citation markers such as [12], or identifiers. Keep proper nouns and brand names in their original form unless an established {lang} translation exists.
+4. Keep headings, captions and table cells concise and in the same style as the source (a noun phrase stays a noun phrase; no final period that the source does not have).
+5. If an item is already in {lang} or has nothing to translate, leave it out.
+
+TERMS
+After the items, list in "terms" the specialised terms, abbreviations, names or titles whose translation you had to decide on this page and that are likely to appear again in the document ({{"src": "original term", "tgt": "translated term"}}). Skip everyday words and terms already in the glossary. Use an empty list if there are none.
+
+OUTPUT
+Reply with ONE valid JSON object and nothing else (no code fence, no commentary; escape quotes and backslashes inside strings):
+{{"items": [{{"id": 1, "layout": "paragraph", "align": "left", "lines": ["first printed line", "second printed line"], "translation": "..."}}], "terms": [{{"src": "...", "tgt": "..."}}]}}
+If the page has nothing to translate reply {{"items": [], "terms": []}}.
+"""
+
+
+def translate_user(summary: str, glossary: str, page_no: int, page_total: int, resume_after: str | None = None) -> str:
+    """The request text that goes with the screenshot. Standing context is ONLY the short background summary and the glossary
+    entries that occur on this page. Order is prompt-cache friendly: what stays identical between requests comes first."""
+    parts = []
+    if summary:
+        parts.append(f"<background>\n{summary}\n</background>")
+    if glossary:
+        parts.append(f"<glossary>\n{glossary}\n</glossary>")
+    parts.append(f"Translate the page in the attached screenshot (page {page_no} of {page_total}).")
+    if resume_after:
+        parts.append("Your previous answer for this page was cut off by the length limit. Continue with the item that comes right after the one "
+                     f'whose text ends with: "{resume_after}". Do NOT repeat earlier items. Reply with the same JSON format, ids continuing from where you stopped.')
+    return "\n\n".join(parts)
+
+
+# ------------------------------------------------------------------------------ "기본 번역": text of the frames, no screenshot
+def text_system(lang: str) -> str:
     return f"""You are a professional document translator working inside a PDF translation pipeline.
 Translate the text of every element into {lang}.
 
@@ -25,12 +80,9 @@ Output rules:
 """
 
 
-def translate_user(summary: str, glossary: str, page_no: int, page_total: int,
-                   items: list[tuple[int, str, str]]) -> str:
-    """The request body. Standing context is ONLY the short background summary and the glossary entries that occur
-    in this batch; earlier source/translation pairs are deliberately not sent (that is what made every request carry
-    tens of thousands of tokens). Order is prompt-cache friendly: what stays identical between requests (system
-    prompt, summary) comes first, the per-batch glossary and the batch itself last."""
+def text_user(summary: str, glossary: str, page_no: int, page_total: int, items: list[tuple[int, str, str]]) -> str:
+    """The request body of "기본 번역": the background summary, the glossary entries that occur in this batch, then the
+    batch. Order is prompt-cache friendly: what stays identical between requests comes first."""
     parts = []
     if summary:
         parts.append(f"<background>\n{summary}\n</background>")
@@ -41,6 +93,14 @@ def translate_user(summary: str, glossary: str, page_no: int, page_total: int,
     return "\n\n".join(parts)
 
 
+def parse_translations(text: str) -> dict[int, str]:
+    out: dict[int, str] = {}
+    for m in _T_RE.finditer(text):
+        out[int(m.group(1))] = m.group(2).strip("\n").strip()
+    return out
+
+
+# ------------------------------------------------------------------------------ the background summary (both modes)
 def compress_system() -> str:
     return (
         "You maintain the working memory of a long document translation job. "
@@ -66,13 +126,6 @@ Write the updated background notes in English. HARD LIMIT: {budget_tokens} token
 Drop everything else, including details of individual sentences. Quote {lang} renderings exactly.
 
 Reply with <summary>...</summary>. Then add a <term src="source term">translation</term> element for each specialised term, abbreviation, name or title in the newest translations that is likely to come back later in the document (they go into the glossary and are sent to the translator whenever the term occurs)."""
-
-
-def parse_translations(text: str) -> dict[int, str]:
-    out: dict[int, str] = {}
-    for m in _T_RE.finditer(text):
-        out[int(m.group(1))] = m.group(2).strip("\n").strip()
-    return out
 
 
 def parse_terms(text: str) -> list[tuple[str, str]]:

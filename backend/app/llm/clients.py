@@ -1,8 +1,8 @@
 """Thin async clients for OpenAI-compatible, Anthropic and Gemini chat APIs.
 
-Requirement: only TEXT may be sent to the LLM. `chat()` accepts nothing but two
-strings (system, user) and builds the request body exclusively out of them, so
-there is no code path through which a page image or any binary could be sent.
+`chat()` is TEXT-only: it accepts nothing but two strings (system, user) and builds the request body exclusively out of
+them. The page translation sends the screenshot of a page; that goes through `vision.chat_with_image()`, an explicit
+separate function, so an image never leaves by accident.
 """
 from __future__ import annotations
 

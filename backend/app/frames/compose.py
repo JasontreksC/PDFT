@@ -7,8 +7,10 @@ The translation is then typeset into the frame's own place:
   1. its original box
   2. widened into the free space beside it (one-line frames) / lengthened into the free space below it
   3. otherwise the text is scaled down until it fits
-and frames that are alone on their row are FLOWED: the space a shorter (longer) translation frees (needs)
-moves the frames below it, until something printed there (a rule, a box, a picture, untranslated text) stops it.
+That is all in the default mode ("place"): every translation stays where its source was printed, so it never drifts away
+from what is left printed around it (list numbers, formulas, figure references). In the "flow" mode, frames that are alone
+on their row are FLOWED instead: the space a shorter (longer) translation frees (needs) moves the frames below it, until
+something printed there (a rule, a box, a picture, untranslated text) stops it.
 
 "Free space" is decided only by geometry. Pages whose frames did not change are reused from a per-job cache.
 """
@@ -80,14 +82,23 @@ def _measure(body: str, width: float, css: str, archive) -> float:
 
 
 def _movable(f: dict, frames: list[dict], untouched: list[list[float]], containers) -> bool:
-    """Alone on its row (nothing printed beside it), not page chrome, not inside a box / table cell / picture."""
+    """Alone on its row (nothing printed beside it), not page chrome, not inside a box / table cell / picture.
+
+    Text that stays printed on the frame's rows pins the frame, wherever it sits: beside the box, or inside it - the list
+    number in front of a paragraph's first line ("6.   Applicability. This standard ...", the number left out of the
+    translation) lies inside the paragraph's box because the following lines start under it. The printed text cannot move,
+    so a frame that moved would leave it behind and run into it.
+    """
     if f.get("chrome") or f.get("paint"):
         return False
     B = pymupdf.Rect(f["bbox"])
     probe = B + (-0.5, -0.5, 0.5, 0.5)
     if any(c.contains(probe) for c in containers):
         return False
-    for o in [pymupdf.Rect(g["bbox"]) for g in frames if g is not f] + [pymupdf.Rect(u) for u in untouched]:
+    for o in (pymupdf.Rect(u) for u in untouched):
+        if min(o.y1, B.y1) - max(o.y0, B.y0) > 1:              # printed text on the frame's rows: beside it or inside it
+            return False
+    for o in (pymupdf.Rect(g["bbox"]) for g in frames if g is not f):
         if min(o.y1, B.y1) - max(o.y0, B.y0) > 1 and (o.x0 >= B.x1 - 1 or o.x1 <= B.x0 + 1):
             return False
     return True
@@ -146,9 +157,15 @@ def _is_todo(f: dict) -> bool:
     return f.get("style") != f.get("orig_style")       # restyled in the editor
 
 
-def _page_sig(frames: list[dict], default_family: str | None, paint: bool) -> str:
+def _cut(f: dict) -> list[list[float]]:
+    """The boxes whose text is erased: "cut" (frames.build.redaction_rects), else, in documents made before it existed,
+    the line boxes."""
+    return f.get("cut") or f["lines"]
+
+
+def _page_sig(frames: list[dict], default_family: str | None, paint: bool, flow: bool = False) -> str:
     h = hashlib.sha1()
-    h.update(json.dumps([default_family, paint], ensure_ascii=False).encode())
+    h.update(json.dumps([default_family, paint, flow], ensure_ascii=False).encode())
     for f in frames:
         h.update(json.dumps([f["id"], f.get("tgt"), f["style"], f["bbox"]], ensure_ascii=False).encode())
     return h.hexdigest()
@@ -173,7 +190,8 @@ def _draw(page, rect: pymupdf.Rect, body: str, css: str, archive, scale_low: flo
 
 
 def _compose_page(src: pymupdf.Document, pno: int, fs: list[dict], todo: list[dict], untouched: list[list[float]],
-                  paint: bool, key, faces: dict, css: str, archive, stats: dict) -> tuple[bytes, dict[str, list[float]]]:
+                  paint: bool, key, faces: dict, css: str, archive, stats: dict,
+                  flow: bool = False) -> tuple[bytes, dict[str, list[float]]]:
     pd = pymupdf.open()
     pd.insert_pdf(src, from_page=pno, to_page=pno)
     page = pd[0]
@@ -182,7 +200,7 @@ def _compose_page(src: pymupdf.Document, pno: int, fs: list[dict], todo: list[di
     boxes = {f["id"]: pymupdf.Rect(f["bbox"]) for f in fs}          # where everything is printed NOW (updated as frames move)
     fixed_text = [pymupdf.Rect(b) for b in untouched]
 
-    mov = [f for f in todo if _movable(f, fs, untouched, containers)]
+    mov = [f for f in todo if flow and _movable(f, fs, untouched, containers)]     # "place" mode: nothing moves
     mov_ids = {f["id"] for f in mov}
 
     # ---- natural size of every movable frame (its own width, or the free space beside a one-liner)
@@ -221,12 +239,14 @@ def _compose_page(src: pymupdf.Document, pno: int, fs: list[dict], todo: list[di
 
     # ---- remove the old text (and, on picture-backed pages, paint its place)
     bgs = {}
+    # "cut": the line boxes pulled back from the glyphs that stay printed (frames.build.redaction_rects); older documents
+    # have only "lines"
     for f in todo:
         if paint or f.get("paint"):
-            for lb in f["lines"]:
+            for lb in _cut(f):
                 bgs[tuple(lb)] = geometry.background_color(page, pymupdf.Rect(lb))
     for f in todo:
-        for lb in f["lines"]:
+        for lb in _cut(f):
             page.add_redact_annot(pymupdf.Rect(lb) + (0.4, 0.4, -0.4, -0.4), fill=False)
     page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
                           text=pymupdf.PDF_REDACT_TEXT_REMOVE)
@@ -235,7 +255,7 @@ def _compose_page(src: pymupdf.Document, pno: int, fs: list[dict], todo: list[di
         r = pymupdf.Rect(d["rect"])
         if r.height > 1.6 or r.width < 4:
             continue
-        if any(r.x0 >= lb[0] - 2 and r.x1 <= lb[2] + 2 and lb[3] - 3.5 <= r.y0 <= lb[3] + 3.5 for f in todo for lb in f["lines"]):
+        if any(r.x0 >= lb[0] - 2 and r.x1 <= lb[2] + 2 and lb[3] - 3.5 <= r.y0 <= lb[3] + 3.5 for f in todo for lb in _cut(f)):
             page.add_redact_annot(r + (-0.4, -0.4, 0.4, 0.4), fill=False)
             n_ul += 1
     if n_ul:
@@ -326,8 +346,9 @@ def _compose_page(src: pymupdf.Document, pno: int, fs: list[dict], todo: list[di
 
 
 def compose(doc: dict, fonts: FontManager, default_family: str | None, out_pdf: Path, source_pdf: Path,
-            cache: dict | None = None) -> dict:
-    """Write `out_pdf` (same pages as the source). Returns {"pages", "positions", "page_size", "fit"}."""
+            cache: dict | None = None, flow: bool = False) -> dict:
+    """Write `out_pdf` (same pages as the source). Returns {"pages", "positions", "page_size", "fit"}.
+    flow=False ("place", the default): every translation in its own place; True: free frames are flowed (see top)."""
     cache = cache if cache is not None else {}
     n = int(doc["page_count"])
     keep = set(doc.get("keep_pages") or [])
@@ -374,14 +395,14 @@ def compose(doc: dict, fonts: FontManager, default_family: str | None, out_pdf: 
                     out.insert_pdf(src, from_page=pno, to_page=pno)
                     continue
                 fs = by_page[pno]
-                sig = _page_sig(todo, default_family, pno in paint_pages)
+                sig = _page_sig(todo, default_family, pno in paint_pages, flow)
                 hit = cache.get(pno)
                 if hit and hit[0] == sig:
                     data, pos, pst = hit[1], hit[2], hit[3]
                 else:
                     pst = {k: 0 for k in stats}
                     data, pos = _compose_page(src, pno, fs, todo, doc.get("untouched", {}).get(str(pno), []),
-                                              pno in paint_pages, key, faces, css, archive, pst)
+                                              pno in paint_pages, key, faces, css, archive, pst, flow)
                     cache[pno] = (sig, data, pos, pst)
                 for k, v in pst.items():
                     stats[k] = stats.get(k, 0) + v

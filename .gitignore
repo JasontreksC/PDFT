@@ -8,3 +8,8 @@ __pycache__/
 .venv/
 
 test/
+
+# OAuth client secrets (never commit)
+pdft_client_secert.json
+*client_secret*.json
+*client_secert*.json

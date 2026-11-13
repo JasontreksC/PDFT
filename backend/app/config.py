@@ -149,7 +149,9 @@ DEFAULT_SETTINGS = {
     "default_font": None,
     "auto_compress": True,         # refresh the short background summary while translating
     "concurrency": 4,
-    "parser_hints": True,          # also use the local Docling layout as hints for text pages (scans always need it)
+    "image_long_side": 2000,       # longer edge (px) of the page screenshot sent to the model
+    "translate_mode": "basic",     # "basic": Docling layout hints + the text of the frames / "advanced": page screenshots (vision)
+    "layout_mode": "place",        # "place": every translation stays in its original place; "flow": stack the free frames
 }
 
 

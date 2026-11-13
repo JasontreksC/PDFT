@@ -1,11 +1,12 @@
 """Filesystem-backed job store.
 
 jobs/<id>/
-  meta.json               public job state (status, analysis info, progress, compose state)
+  meta.json               job state (status, analysis info, progress, compose state) + `owner`, the member it belongs to
   source.pdf              the upload
-  parse.json              parser result of the local Docling service (items tree) - only when it was used
+  parse.json              layout analysis of the Docling service (items tree) - "기본 번역" only
   doc.json                the document model (version 2): frames = pieces of text at their place on the original
-                          page (src / tgt / style / geometry), plus untouched text, verbatim pages ...
+                          page (src / tgt / style / geometry; they appear when a page is translated), the text that
+                          stays as printed, verbatim pages, per-page results ...
   composed.pdf            the original pages with the translated text typeset in (viewer + export)
   positions.json          where every frame landed in composed.pdf (hit boxes for the editor)
   render/                 cached page PNGs
@@ -173,7 +174,7 @@ class JobStore:
                 meta["compose"]["busy"] = False
             self.jobs[meta["id"]] = Job(d, meta)
 
-    def create(self, filename: str) -> Job:
+    def create(self, filename: str, owner: str | None = None) -> Job:
         jid = uuid.uuid4().hex[:12]
         d = self.root / jid
         d.mkdir(parents=True)
@@ -181,6 +182,7 @@ class JobStore:
             "id": jid, "filename": filename, "status": "uploaded", "error": None, "created": time.time(),
             "pages": [], "progress": {"done": 0, "total": 0, "message": "", "warnings": 0},
             "settings": {}, "analysis": None, "compose": None, "scan_pages": 0,
+            "owner": owner,                 # the member's id (auth/); None = from before there were members
         }
         job = Job(d, meta)
         self.jobs[jid] = job

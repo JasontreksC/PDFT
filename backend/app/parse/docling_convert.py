@@ -4,12 +4,15 @@
    "credits": 0, "job_id": ..., "tier": "docling", "seconds": ...}
 
 bbox are PDF points with a TOP-LEFT origin, like the page geometry the builder works in. This module needs the `docling`
-package; it is imported by the local Docling service (docling_host/) or by the app itself when it runs natively.
+package; it is imported by the Docling service container (docling/).
 """
 from __future__ import annotations
 
+import logging
 import time
 from typing import Callable
+
+log = logging.getLogger("uvicorn.error")
 
 _TYPE = {
     "title": "heading", "section_header": "heading",
@@ -18,14 +21,15 @@ _TYPE = {
 }
 
 
-def make_converter(*, table_structure: bool = False, ocr: bool = True, device: str = "auto", threads: int = 8):
+def make_converter(*, table_structure: bool = False, device: str = "auto", threads: int = 8):
+    """Layout analysis only: OCR is always off (PDFT reads the text layer; pages without one are not translated)."""
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import AcceleratorDevice, AcceleratorOptions, PdfPipelineOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
     opts = PdfPipelineOptions()
     opts.do_table_structure = table_structure
-    opts.do_ocr = ocr
+    opts.do_ocr = False
     opts.accelerator_options = AcceleratorOptions(num_threads=threads, device=getattr(AcceleratorDevice, device.upper()))
     return DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)})
 
@@ -101,7 +105,7 @@ def _items_of(doc, page_heights: dict[int, float]) -> dict[int, list[dict]]:
 
 def _flag_table_lines(pages: dict[int, list[dict]]) -> None:
     """With table-structure recognition off Docling reports the text of a table as one item per LINE next to the table
-    item. Such lines are marked `in_table`: good as text (scans), useless as 'this is one box' hints."""
+    item. Such lines are marked `in_table`: useless as 'this is one box' hints."""
     for items in pages.values():
         tabs = [it["bbox"][0] for it in items if it["type"] == "table"]
         if not tabs:
@@ -115,7 +119,7 @@ def _flag_table_lines(pages: dict[int, list[dict]]) -> None:
                 it["in_table"] = True
 
 
-def convert_pdf(path, *, table_structure: bool = False, ocr: bool = True, device: str = "auto", threads: int = 8,
+def convert_pdf(path, *, table_structure: bool = False, device: str = "auto", threads: int = 8,
                 chunk: int = 8, on_progress: Callable[[int, int], None] | None = None, converter=None) -> dict:
     """Convert a whole PDF (in page chunks, so progress can be reported and memory stays bounded)."""
     import pymupdf
@@ -124,9 +128,10 @@ def convert_pdf(path, *, table_structure: bool = False, ocr: bool = True, device
     with pymupdf.open(path) as d:
         n = d.page_count
         sizes = {i + 1: d[i].rect.height for i in range(n)}
-    conv = converter or make_converter(table_structure=table_structure, ocr=ocr, device=device, threads=threads)
+    conv = converter or make_converter(table_structure=table_structure, device=device, threads=threads)
     by_page: dict[int, list[dict]] = {}
     ok: dict[int, bool] = {}
+    first_err: str | None = None
     for a in range(1, n + 1, chunk):
         b = min(n, a + chunk - 1)
         try:
@@ -138,11 +143,15 @@ def convert_pdf(path, *, table_structure: bool = False, ocr: bool = True, device
                 by_page[pno] = items
             for pno in range(a, b + 1):
                 ok[pno] = True
-        except Exception:  # noqa: BLE001 - one bad chunk must not lose the whole document
+        except Exception as e:  # noqa: BLE001 - one bad chunk must not lose the whole document
+            log.exception("Docling failed on pages %d-%d", a, b)
+            first_err = first_err or f"{type(e).__name__}: {e}"
             for pno in range(a, b + 1):
                 ok[pno] = False
         if on_progress:
             on_progress(b, n)
+    if n and first_err and not any(ok.values()):
+        raise RuntimeError(f"모든 쪽의 분석이 실패했습니다 - {first_err}")
     pages = [{"page_number": i, "success": ok.get(i, False), "items": by_page.get(i, [])} for i in range(1, n + 1)]
     return {"items": {"pages": pages}, "credits": 0, "job_id": "docling", "tier": "docling",
             "seconds": round(time.time() - t0, 1)}

@@ -1,5 +1,4 @@
 docling
-ocrmac
 pymupdf
 fastapi
 uvicorn[standard]
